@@ -17,5 +17,6 @@ void elongate_horizontal(cv::Mat &binary);
 void meet_vertical(cv::Mat &binary);
 void meet_horizontal(cv::Mat &binary);
 void reverse(cv::Mat &binary);
+void color_significance(cv::Mat &hsv, cv::Mat &grayscale, double orient);
 
-void show(cv::Mat &matrix, const char* window, int width = 800, int height = 600); 
+void show(cv::Mat &matrix, const char* window, int width = 800, int height = 600);
