@@ -7,6 +7,8 @@ typedef struct anchors {
     double zoom;
 } anchors_t;
 
+double process(char* file);
+
 void anchor(cv::Mat &image, anchors_t &anchors, double prepzoom);
 void filter_mean_color(cv::Mat &colored, anchors_t &anchors);
 

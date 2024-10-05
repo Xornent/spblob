@@ -1,11 +1,49 @@
 
+// conditional compilation switches =========================================== 
+
+// enable color filtering: the anchor triangles will be filtered to retain
+//     those with perceptible red color.
+
 #define filter_color
+
+// anchor detection modes:
+//
+// extendmorph: find the edges of the grayscale (or color channel) images,
+//     trying to connect slightly incontinuous segments, and widen the contour
+//     outline by a single dilation morphology operation.
+//
+// lineseg: simplify the canny edges with a predictive line segments, and draw
+//     these segments with a greater length to a new bitmap as the edges.
+//
+// threshold: direct thresholding (static). while a normalization step is
+//     required to tolerate more variable images, current tests suggests that
+//     this static threshold is enough for now. if you use raw grayscale, the
+//     thresholding step is rather dissatisfying. however, if you use the
+//     extracted red-ness degrees (i figured it out through a simple hsv transformation)
+//     the red parts is extensively highlighted and the threshold make sense,
+//     and this color transform overperform all attempts before.
 
 #undef anchordet_extendmorph
 #undef anchordet_lineseg
 #define anchordet_threshold
 
-#define debug
+// operation mode:
+//
+// splitimage: split the image into several roisize * roisize blocks. and
+//     process each block seperately before mapping the results to the original
+//     image. (a batch work, and may use parallel.). it is not recommended now,
+//     this takes more time than processing as a whole even it's parallel, and
+//     serves only to gain greater performance (with less distraction information)
+//     when using extendmorph detection algorithm.
+//
+// wholeimage: process as a whole.
+//
+// debug switch: this will allow you to specify the region of interest when in
+//     split-image mode, and will toggle on the verbose field, so you will see
+//     images of each step showing up. you can specify the region of interest
+//     with debug_w and debug_h.
+
+#undef debug
 
 #undef mode_splitimage
 #define debug_w 1050
@@ -14,23 +52,60 @@
 
 #define mode_wholeimage
 
+// ============================================================================
+
+#include <iostream>
+#include <filesystem>
+namespace fs = std::filesystem;
+#include <chrono>
+namespace chrono = std::chrono;
+
 #include <opencv2/opencv.hpp>
 #include <opencv2/highgui.hpp>
 #include <opencv2/calib3d.hpp>
-#include <iostream>
+
 #include "spblob.h"
 
 int main(int argc, char* argv[]) {
 
     if (argc == 1) {
-        printf("usage: spblob [PATH]\n");
+        printf("spblob: blob semen patches from images.\n");
+        printf("usage: spblob [-d] [PATH]\n\n");
+        printf("positional arguments:\n");
+        printf("PATH   the path to the image file, or the directory containing\n");
+        printf("       image files when supplying -d option\n\n");
+        printf("options:\n");
+        printf("-d     toogle directory process mode\n");
         return 1;
     }
 
+    if (strcmp(argv[1], "-d") == 0) {
+
+        char* dir = argv[2];
+        std::string path(dir);
+        for (const auto & entry : fs::directory_iterator(path)) {
+            if (!entry.is_directory()) {
+                printf("processing %s ... ", (char*)(entry.path().filename().c_str()));
+                double dur = process((char*)(entry.path().c_str()));
+                printf(" %.4f s\n", dur);
+            }
+        }
+
+    } else {
+        printf("processing %s ... ", argv[1]);
+        double dur = process(argv[1]);
+        printf(" %.4f s\n", dur);
+    }
+
+    return 0;
+}
+
+double process(char* file) {
+    
     // read the specified image in different color spaces.
 
-    cv::Mat grayscale = cv::imread(argv[1], cv::IMREAD_GRAYSCALE);
-    cv::Mat colored = cv::imread(argv[1], cv::IMREAD_COLOR);
+    cv::Mat grayscale = cv::imread(file, cv::IMREAD_GRAYSCALE);
+    cv::Mat colored = cv::imread(file, cv::IMREAD_COLOR);
     
     cv::Mat colored_hsv;
     cv::cvtColor(colored, colored_hsv, cv::COLOR_BGR2HSV);
@@ -38,13 +113,14 @@ int main(int argc, char* argv[]) {
     cv::Mat component_red;
     grayscale.copyTo(component_red);
     color_significance(colored_hsv, component_red, 0.0);
-
     show(component_red, "red", 800, 600);
 
     cv::Mat annot;
     colored.copyTo(annot);
 
     double zoom_first_round = 1;
+
+    auto start = chrono::system_clock::now();
 
 #if defined(mode_splitimage)
 
@@ -95,8 +171,6 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    show(annot, "annotated", 800, 600);
-
 #endif
 
 #elif defined(mode_wholeimage)
@@ -128,11 +202,15 @@ int main(int argc, char* argv[]) {
         );
     }
 
-    show(annot, "annotated", 800, 600);
-
 #endif
 
-    return 0;
+    auto end = chrono::system_clock::now();
+    auto duration = chrono::duration_cast<chrono::milliseconds>(end - start);
+    double ms = double(duration.count()) * chrono::milliseconds::period::num /
+        chrono::milliseconds::period::den;
+
+    show(annot, "annotated", 800, 600);
+    return ms;
 }
 
 void anchor(cv::Mat &image, anchors_t &anchors, double prepzoom) {
@@ -495,6 +573,10 @@ void reverse(cv::Mat &binary) {
         }
     }
 }
+
+// calculate the perceptible color intensity. a simple transformation from
+// the hsv colorspace: cos(delta.H) * S * V.
+// orient: the hue [0, 360] to extract color intensity, 0 as red.
 
 void color_significance(cv::Mat &hsv, cv::Mat &grayscale, double orient) {
     
