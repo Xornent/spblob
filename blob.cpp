@@ -63,8 +63,9 @@ namespace chrono = std::chrono;
 #include <opencv2/opencv.hpp>
 #include <opencv2/highgui.hpp>
 #include <opencv2/calib3d.hpp>
+#include <opencv2/plot.hpp>
 
-#include "spblob.h"
+#include "blob.h"
 
 int main(int argc, char* argv[]) {
 
@@ -203,6 +204,117 @@ double process(char* file) {
     }
 
 #endif
+
+    // here, we will scale the image to a relatively uniform size. and infer
+    // the relative center for each detection.
+
+    cv::Mat scaled_gray, scaled_color;
+    cv::resize(grayscale, scaled_gray, cv::Size(0, 0), anch.zoom, anch.zoom);
+    cv::resize(colored, scaled_color, cv::Size(0, 0), anch.zoom, anch.zoom);
+    double zoom = anch.zoom;
+
+    std::vector< std::pair< int, cv::Point2d >> meeting_points;
+    std::vector< std::pair< int, int >> paired;
+    std::vector< cv::Point2d > base_vertice;
+    std::vector< cv::Point2d > base_meeting;
+
+    for (int i = 0; i < anch.detections; i++) {
+        cv::Point2d p1(anch.vertices[6 * i + 0] * zoom, anch.vertices[6 * i + 1] * zoom);
+        cv::Point2d p2(anch.vertices[6 * i + 2] * zoom, anch.vertices[6 * i + 3] * zoom);
+        cv::Point2d p3(anch.vertices[6 * i + 4] * zoom, anch.vertices[6 * i + 5] * zoom);
+        
+        cv::Point2d vert, hei;
+
+        if (distance(p1, p2) < distance(p2, p3) && distance(p1, p3) < distance(p2, p3)) {
+            vert = p1;
+            hei = cv::Point2d((p2.x + p3.x) / 2, (p2.y + p3.y) / 2);
+        }
+
+        if (distance(p2, p1) < distance(p1, p3) && distance(p2, p3) < distance(p1, p3)) {
+            vert = p2;
+            hei = cv::Point2d((p1.x + p3.x) / 2, (p1.y + p3.y) / 2);
+        }
+
+        if (distance(p3, p2) < distance(p1, p2) && distance(p3, p1) < distance(p1, p2)) {
+            vert = p3;
+            hei = cv::Point2d((p1.x + p2.x) / 2, (p1.y + p2.y) / 2);
+        }
+
+        std::pair<int, cv::Point2d> temp;
+        temp.first = i;
+        temp.second = cv::Point2d(
+            vert.x + (hei.x - vert.x) * 5.02,
+            vert.y + (hei.y - vert.y) * 5.02
+        );
+        meeting_points.push_back(temp);
+        base_vertice.push_back(vert);
+    }
+
+    // approximate pairs by adjacent meeting points
+    // (tolerate a range within 20px range)
+    
+    for (int i = 0; i < meeting_points.size(); i ++) {
+        for (int j = i + 1; j < meeting_points.size(); j ++) {
+            if (distance(meeting_points[i].second, meeting_points[j].second) < 20.0) {
+                paired.push_back(std::pair<int, int>(
+                    meeting_points[i].first, meeting_points[j].first
+                ));
+                base_meeting.push_back( cv::Point2d(
+                    (meeting_points[i].second.x + meeting_points[j].second.x) * 0.5,
+                    (meeting_points[i].second.y + meeting_points[j].second.y) * 0.5
+                ));
+            }
+        }
+    }
+
+    // calculate the grayscale on the uncorrected base line.
+
+    for (int i = 0; i < paired.size(); i++) {
+        cv::Point2d v1 = base_vertice[paired[i].first];
+        cv::Point2d v2 = base_vertice[paired[i].second];
+        cv::Point2d vtop, vbottom;
+
+        cv::Point2d origin((v1.x + v2.x) * 0.5, (v1.y + v2.y) * 0.5);
+        cv::Point2d meet = base_meeting[i];
+
+        int signx = -1;
+        int signy = 1;
+
+        if (v1.y > v2.y) { vtop = v1; vbottom = v2; }
+        else { vtop = v2; vbottom = v1; }
+
+        double dx = vtop.x - vbottom.x;
+        double dy = vtop.y - vbottom.y;
+
+        double testx, testy;
+        testx = origin.x + dy * signy;
+        testy = origin.y + dx * signx;
+        double prod = testx * (meet.x - origin.x) + testy * (meet.y - origin.y);
+        if (prod < 0) { signx = 1; signy = -1; }
+
+        cv::Point2d end(
+            origin.x + dy * 4.0 * signy,
+            origin.y + dx * 4.0 * signx
+        );
+
+        auto hist = extract_line(scaled_gray, origin, end);
+        int length = hist.size();
+        double* array = (double*)malloc(sizeof(double) * length);
+        for (int j = 0; j < length; j++) {
+            array[j] = hist[j].first * 1.0;
+        }
+
+        plot(length, array, "histogram");
+
+        cv::line(
+            annot, cv::Point2d(origin.x / zoom, origin.y / zoom),
+            cv::Point2d(end.x / zoom, end.y / zoom),
+            cv::Scalar(0, 0, 255, 0), 2, 8
+        );
+
+        // we will then extract the sharp turning point using a method based on
+        // statistical observation on t-test.
+    }
 
     auto end = chrono::system_clock::now();
     auto duration = chrono::duration_cast<chrono::milliseconds>(end - start);
@@ -605,4 +717,84 @@ void show(cv::Mat &matrix, const char* window, int width, int height) {
     cv::imshow(window, matrix);
     cv::waitKey();
     cv::destroyAllWindows();
+}
+
+std::vector< std::pair< uchar, int >> extract_line(
+    cv::Mat &grayscale, cv::Point start, cv::Point end
+) {
+
+    std::vector< std::pair<uchar, int>> result;
+    int row = grayscale.rows;
+    int col = grayscale.cols;
+
+    int r1 = start.y;
+    int c1 = start.x;
+    int r2 = end.y;
+    int c2 = end.x;
+
+    // distance between the two anchors
+    float dist = round(sqrt(pow(float(r2) - float(r1), 2.0) + pow(float(c2) - float(c1), 2.0)));
+    if (dist <= 0.00001f) {
+        // too short distance. return the origin point.
+        std::pair<uchar, int> temp;
+        temp.first = grayscale.at<uchar>(r1, c1);
+        temp.second = 0;
+        result.push_back(temp);
+        return result;
+    }
+
+    float slope_r = (float(r2) - float(r1)) / dist;
+    float slope_c = (float(c2) - float(c1)) / dist;
+
+    int k = 0;
+    for (float i = 0; i <= dist; ++i) {
+        int posy = int(r1) + int(round(i * slope_r));
+        int posx = int(c1) + int(round(i * slope_c));
+
+        if (posx > grayscale.cols) continue;
+        if (posy > grayscale.rows) continue;
+        if (posx < 0) continue;
+        if (posy < 0) continue;
+
+        std::pair<uchar, int> temp;
+        temp.first = grayscale.at<uchar>(posy, posx);
+        temp.second = k;
+        k++;
+        result.push_back(temp);
+    }
+
+    return result;
+}
+
+void plot(int n, double vec[], const char* title) {
+
+    cv::Mat data_x(1, n, CV_64F);
+    cv::Mat data_y(1, n, CV_64F);
+
+    // fill the matrix with custom data.
+    for (int i = 0; i < data_x.cols; i++) {
+        data_x.at<double>(0, i) = i;
+        data_y.at<double>(0, i) = vec[i];
+    }
+
+    cv::Mat plot_result;
+    cv::Ptr<cv::plot::Plot2d> plot = cv::plot::Plot2d::create(data_x, data_y);
+    plot -> render(plot_result);
+
+    cv::imshow(title, plot_result);
+    cv::waitKey();
+    cv::destroyAllWindows();
+}
+
+double distance(cv::Point2d p1, cv::Point2d p2) {
+    return sqrt(pow(p1.x - p2.x, 2) + pow(p1.y - p2.y, 2));
+}
+
+std::vector<regions_t> turning(int n, double* arr, int boot, double cutoff, int trim) {
+    std::vector<regions_t> res;
+    return res;
+}
+
+double distribution_test(int n1, int n2, double* arr1, double* arr2) {
+    return 0;
 }
