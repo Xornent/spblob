@@ -643,6 +643,47 @@ double dnorm4(double x, double mu, double sigma, int give_log)
 #endif
 }
 
+double dt(double x, double n, int give_log)
+{
+
+#ifdef IEEE_754
+    if (ISNAN(x) || ISNAN(n))
+        return x + n;
+#endif
+
+    if (n <= 0) ML_ERR_return_NAN;
+    if (!R_FINITE(x)) return R_D__0;
+    if (!R_FINITE(n)) return dnorm(x, 0., 1., give_log);
+
+    double u, t = -bd0(n / 2., (n + 1) / 2.) + stirlerr((n + 1) / 2.) - stirlerr(n / 2.),
+              x2n = x * x / n, ax = 0., l_x2n;                 
+    
+    bool_t lrg_x2n = (x2n > 1. / DBL_EPSILON);
+    
+    if (lrg_x2n)
+    {
+        ax = fabs(x);
+        l_x2n = log(ax) - log(n) / 2.;
+        u = n * l_x2n;
+    }
+    else if (x2n > 0.2)
+    {
+        l_x2n = log(1 + x2n) / 2.;
+        u = n * l_x2n;
+    }
+    else
+    {
+        l_x2n = log1p(x2n) / 2.;
+        u = -bd0(n / 2., (n + x * x) / 2.) + x * x / 2.;
+    }
+
+    if (give_log)
+        return t - u - (M_LN_SQRT_2PI + l_x2n);
+
+    double I_sqrt_ = (lrg_x2n ? sqrt(n) / ax : exp(-l_x2n));
+    return exp(t - u) * M_1_SQRT_2PI * I_sqrt_;
+}
+
 double pf(double x, double df1, double df2, int lower_tail, int log_p)
 {
 
@@ -1652,6 +1693,115 @@ void pnorm_both(double x, double *cum, double *ccum, int i_tail, int log_p)
 #endif
 
     return;
+}
+
+double pt(double x, double n, int lower_tail, int log_p)
+{
+    // return  P[ T <= x ]	where
+    // T ~ t_{n}  (t distrib. with n degrees of freedom). 
+    // see pnt.c for non-central t distribution.
+
+    double val, nx;
+
+#ifdef IEEE_754
+    if (ISNAN(x) || ISNAN(n))
+        return x + n;
+#endif
+
+    if (n <= 0.0)
+        ML_ERR_return_NAN;
+
+    if (!R_FINITE(x))
+        return (x < 0) ? R_DT_0 : R_DT_1;
+    if (!R_FINITE(n))
+        return pnorm(x, 0.0, 1.0, lower_tail, log_p);
+
+    nx = 1 + (x / n) * x;
+
+    // fixme: this test is probably losing rather than gaining precision,
+    // now that pbeta(*, log_p = true) is much better.
+    // note however that a version of this test *is* needed for x*x > d_max
+
+    if (nx > 1e100)
+    {
+        // Danger of underflow. So use Abramowitz & Stegun 26.5.4
+        // pbeta(z, a, b) ~ z^a(1-z)^b / aB(a,b) ~ z^a / aB(a,b),
+        // with z = 1/nx,  a = n/2,  b= 1/2 :
+
+        double lval;
+        lval = -0.5 * n * (2 * log(fabs(x)) - log(n)) - lbeta(0.5 * n, 0.5) - log(0.5 * n);
+        val = log_p ? lval : exp(lval);
+    }
+    else
+    {
+        val = (n > x * x)
+                  ? pbeta(x * x / (n + x * x), 0.5, n / 2., /*lower_tail*/ 0, log_p)
+                  : pbeta(1. / nx, n / 2., 0.5, /*lower_tail*/ 1, log_p);
+    }
+
+    // Use "1 - v" if lower_tail and x > 0 (but not both):
+
+    if (x <= 0.)
+        lower_tail = !lower_tail;
+
+    if (log_p)
+    {
+        if (lower_tail)
+            return log1p(-0.5 * exp(val));
+        else
+            return val - M_LN2; // = log(.5* pbeta(....))
+    }
+    else
+    {
+        val /= 2.;
+        return R_D_Cval(val);
+    }
+}
+
+double lbeta(double a, double b)
+{
+    double corr, p, q;
+
+#ifdef IEEE_754
+    if (ISNAN(a) || ISNAN(b))
+        return a + b;
+#endif
+    p = q = a;
+    if (b < p)
+        p = b; // := min(a,b)
+    if (b > q)
+        q = b; // := max(a,b)
+
+    // both arguments must be >= 0
+
+    if (p < 0)
+        ML_ERR_return_NAN else if (p == 0)
+        {
+            return ML_POSINF;
+        }
+    else if (!R_FINITE(q))
+    {
+        return ML_NEGINF;
+    }
+
+    if (p >= 10) // p and q are big. 
+    {
+        corr = lgammacor(p) + lgammacor(q) - lgammacor(p + q);
+        return log(q) * -0.5 + M_LN_SQRT_2PI + corr + 
+               (p - 0.5) * log(p / (p + q)) + q * log1p(-p / (p + q));
+    }
+    else if (q >= 10) // p is small, but q is big.
+    {
+        corr = lgammacor(q) - lgammacor(p + q);
+        return lgammafn(p) + corr + p - p * log(p + q) + (q - 0.5) * log1p(-p / (p + q));
+    }
+    else // p and q are small: p <= q < 10.
+    {
+        if (p < 1e-306)
+            return lgamma(p) + (lgamma(q) - lgamma(p + q));
+        else
+            return log(gammafn(p) * (gammafn(q) / gammafn(p + q)));
+    }
 }
 
 double fmax2(double x, double y)

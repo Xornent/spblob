@@ -293,15 +293,20 @@ double process(char* file) {
         if (prod < 0) { signx = 1; signy = -1; }
 
         cv::Point2d end(
-            origin.x + dy * 4.0 * signy,
-            origin.y + dx * 4.0 * signx
+            origin.x + dy * 4.5 * signy,
+            origin.y + dx * 4.5 * signx
         );
+
+        double unify = dx * signx / sqrt(pow(dx, 2) + pow(dy, 2));
+        double unifx = dy * signy / sqrt(pow(dx, 2) + pow(dy, 2));
 
         auto hist = extract_line(scaled_gray, origin, end);
         int length = hist.size();
         double* array = (double*)malloc(sizeof(double) * length);
+        printf("------------------------------");
         for (int j = 0; j < length; j++) {
             array[j] = hist[j].first * 1.0;
+            printf("%d\n", hist[j].first);
         }
 
         plot(length, array, "histogram");
@@ -314,6 +319,26 @@ double process(char* file) {
 
         // we will then extract the sharp turning point using a method based on
         // statistical observation on t-test.
+
+        auto regions_raw = rmdm(length, array, 0.01, 100);
+        
+        for (auto reg : regions_raw) {
+            cv::circle(
+                annot,
+                cv::Point2d(
+                    (origin.x + unifx * reg.start) / zoom,
+                    (origin.y + unify * reg.start) / zoom
+                ), 5, cv::Scalar(0, 0, 255, 0), cv::FILLED
+            );
+
+            cv::circle(
+                annot,
+                cv::Point2d(
+                    (origin.x + unifx * reg.end) / zoom,
+                    (origin.y + unify * reg.end) / zoom
+                ), 5, cv::Scalar(0, 255, 0, 0), cv::FILLED
+            );
+        }
     }
 
     auto end = chrono::system_clock::now();
@@ -790,11 +815,200 @@ double distance(cv::Point2d p1, cv::Point2d p2) {
     return sqrt(pow(p1.x - p2.x, 2) + pow(p1.y - p2.y, 2));
 }
 
-std::vector<regions_t> turning(int n, double* arr, int boot, double cutoff, int trim) {
-    std::vector<regions_t> res;
+std::vector<regions_t> seqseg(int n, double* arr, int boot, double cutoff, double zcutoff, int skip) {
+    static std::vector<regions_t> res;
+    res.clear();
+    
+    regions_t* current = NULL;
+    for (int i = 0; i < n; i ++) {
+
+        if (current == NULL) {
+            current = (regions_t*) malloc(sizeof(regions_t));
+            current -> start = i;
+            current -> end = i + boot - 1 > n ? n : i + boot - 1;
+
+            for (int j = current -> start; j <= current -> end; j ++)
+                current -> values[j -  current -> start] = (arr[j]);
+            i = current -> end;
+            continue;
+        }
+
+        else {
+
+            int next_start = i;
+            int next_end = i + boot - 1 > n ? n : i + boot - 1;
+            double* an = (double*) malloc(sizeof(double) * (next_end - next_start + 1));
+            for (int j = 0; j <= next_end - next_start; j ++) an[j] = arr[next_start + j];
+
+            double lev = levene(
+                current -> end - current -> start + 1,
+                next_end - next_start + 1,
+                current -> values, an);
+
+            if (lev < cutoff) {
+                for (int j = next_start; j <= next_end; j ++) {
+                    double z = normal(*current, arr[j]);
+                    
+                    if (z >= zcutoff) {
+                        current -> end = j;
+                        current -> values[j - current -> start] = (arr[j]);
+                        i = j;
+
+                    } else {
+                        i = j + skip;
+                        res.push_back(*current);
+                        current = NULL;
+                        break;
+                    }
+                }
+
+            } else {
+                for (int j = next_start; j <= next_end; j ++)
+                    current -> values[j - current -> start] = (arr[j]);
+                current -> end = next_end;
+                i = next_end;
+                continue;
+            }
+        }
+    }
+
     return res;
 }
 
-double distribution_test(int n1, int n2, double* arr1, double* arr2) {
-    return 0;
+#define rmdm_boot 5
+
+int rmdm_rec(int n, double* arr, double cutoff, std::vector<int> &seps, int start, int round) {
+
+    if (n < 2 * rmdm_boot) return -1;
+    if (round <= 0) return -1;
+
+    double* t_vals = (double*) malloc(sizeof(double) * (n - 2 * rmdm_boot + 1));
+    for (int i = rmdm_boot; i < n - rmdm_boot + 1; i ++)
+        t_vals[i - rmdm_boot] = fabs(t(i, n - i, arr, (arr + i)));
+    double tmax = amax(n - (2 * rmdm_boot - 1), t_vals);
+    int idtmax = imax(n - (2 * rmdm_boot - 1), t_vals);
+    double p = 1 - pt(tmax, n - 1, TRUE, FALSE);
+    
+    if (p < cutoff) {
+        seps.push_back(idtmax + rmdm_boot + start);
+        rmdm_rec(idtmax + rmdm_boot, arr, cutoff, seps, start, round - 1);
+        rmdm_rec(n - idtmax - rmdm_boot, arr + idtmax, cutoff, seps, start + idtmax + rmdm_boot, round - 1);
+    }
+
+    return idtmax + rmdm_boot + start;
+}
+
+std::vector<regions_t> rmdm(int n, double* arr, double cutoff, int round) {
+    std::vector<int> bounds;
+    rmdm_rec(n, arr, cutoff, bounds, 0, round);
+    sort(bounds.begin(), bounds.end());
+    
+    std::vector<regions_t> regions;
+    int prev = 0;
+    for (int n : bounds) {
+        regions_t* reg = (regions_t*) malloc(sizeof(regions_t));
+        reg -> start = prev;
+        reg -> end = n - 1;
+        prev = n;
+        regions.push_back(*reg);
+    }
+
+    return regions;
+}
+
+double levene(int n1, int n2, double* arr1, double* arr2) {
+
+    double* deviance1 = (double*) malloc(sizeof(double) * n1);
+    double* deviance2 = (double*) malloc(sizeof(double) * n2);
+    double sum1 = 0, sum2 = 0;
+    double dev1 = 0, dev2 = 0;
+    double sqdev1 = 0, sqdev2 = 0; 
+
+    for (int i = 0; i < n1; i ++) sum1 += arr1[i];
+    for (int i = 0; i < n2; i ++) sum2 += arr2[i];
+
+    for (int i = 0; i < n1; i ++) {
+        deviance1[i] = fabs(arr1[i] - sum1 / n1);
+        dev1 += deviance1[i];
+    }
+
+    for (int i = 0; i < n2; i ++) {
+        deviance2[i] = fabs(arr2[i] - sum2 / n1);
+        dev2 += deviance2[i];
+    }
+
+    dev1 /= n1;
+    dev2 /= n2;
+
+    for (int i = 0; i < n1; i ++) sqdev1 += pow(deviance1[i] - dev1, 2);
+    for (int i = 0; i < n2; i ++) sqdev2 += pow(deviance2[i] - dev2, 2);
+
+    double devm = (dev1 + dev2) * 0.5;
+    double m = (n1 + n2 - 2) *
+               (n1 * pow(dev1 - devm, 2) + n2 * pow(dev2 - devm, 2)) /
+               (sqdev1 + sqdev2);
+    
+    return 1 - pf(m, 1, n1 + n2 - 2, TRUE, FALSE);
+}
+
+double t(int n1, int n2, double* arr1, double* arr2) {
+
+    double mean1 = 0, mean2 = 0;
+    double s1 = 0, s2 = 0;
+
+    for (int i = 0; i < n1; i ++) mean1 += arr1[i];
+    for (int i = 0; i < n2; i ++) mean2 += arr2[i];
+    mean1 /= n1;
+    mean2 /= n2;
+
+    for (int i = 0; i < n1; i ++) s1 += pow(arr1[i] - mean1, 2);
+    for (int i = 0; i < n2; i ++) s2 += pow(arr1[i] - mean2, 2);
+    s1 /= (n1 - 1);
+    s2 /= (n2 - 1);
+    
+    return (mean1 - mean2) /
+           sqrt((((n1 - 1.) * s1 + (n2 - 1.) * s2) / (n1 + n2 - 2.)) *
+                (1. / n1 + 1. / n2));
+}
+
+int imax(int n, double* arr) {
+   int i = 0;
+   double m = std::numeric_limits<double>::min();
+   for (int j = 0; j < n; j ++) if (arr[j] > m) { m = arr[j]; i = j; }
+   return i;
+}
+
+int amax(int n, double* arr) {
+   int i = 0;
+   double m = std::numeric_limits<double>::min();
+   for (int j = 0; j < n; j ++) if (arr[j] > m) { m = arr[j]; i = j; }
+   return m;
+}
+
+int imin(int n, double* arr) {
+   int i = 0;
+   double m = std::numeric_limits<double>::max();
+   for (int j = 0; j < n; j ++) if (arr[j] < m) { m = arr[j]; i = j; }
+   return i;
+}
+
+int amin(int n, double* arr) {
+   int i = 0;
+   double m = std::numeric_limits<double>::max();
+   for (int j = 0; j < n; j ++) if (arr[j] < m) { m = arr[j]; i = j; }
+   return m;
+}
+
+double normal(regions_t &r, double x) {
+    
+    double sum = 0;
+    double dev = 0;
+    size_t n = r.end - r.start + 1;
+
+    for (int i = 0; i < n; i++) sum += r.values[i];
+    for (int i = 0; i < n; i++) dev += pow(r.values[i] - (sum / n), 2);
+    r.mean = sum / n;
+    r.stdvar = sqrt(dev / (n - 1));
+
+    return 1 - pnorm(x, r.mean, r.stdvar, TRUE, FALSE);
 }

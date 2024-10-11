@@ -30,27 +30,36 @@ double distance(cv::Point2d p1, cv::Point2d p2);
 typedef struct regions {
     int start;
     int end;
-    std::vector<double> values;
-    std::vector<double> trimmed;
+    double values[400];
     double mean;
-    double variance;
-    double trimmed_mean;
-    double trimmed_variance;
+    double stdvar;
 } regions_t;
 
-std::vector<regions_t> turning(int n, double* arr, int boot, double cutoff, int trim);
+int rmdm_rec(int n, double* arr, double cutoff, std::vector<int> &seps, int start, int round);
+std::vector<regions_t> rmdm(int n, double* arr, double cutoff, int round);
+std::vector<regions_t> seqseg(int n, double* arr, int boot, double cutoff, double zcutoff, int skip);
+double levene(int n1, int n2, double* arr1, double* arr2);
+double normal(regions_t &r, double x);
+double t(int n1, int n2, double* arr1, double* arr2);
+
+int imax(int n, double* arr);
+int amax(int n, double* arr);
+int imin(int n, double* arr);
+int amin(int n, double* arr);
 
 void plot(int n, double vec[], const char* title);
 void show(cv::Mat &matrix, const char* window, int width = 800, int height = 600);
 
 extern "C" {
 
+    typedef enum { FALSE = 0, TRUE } bool_t;
     double df(double x, double m, double n, int give_log);
     double dgamma(double x, double shape, double scale, int give_log);
     double dpois(double x, double lambda, int give_log);
     double dbinom(double x, double n, double p, int give_log);
     double dchisq(double x, double df, int give_log);
     double dnorm4(double x, double mu, double sigma, int give_log);
+    double dt(double x, double n, int give_log);
 
     double pf(double x, double df1, double df2, int lower_tail, int log_p);
     double pchisq(double x, double df, int lower_tail, int log_p);
@@ -58,6 +67,7 @@ extern "C" {
     double pbinom(double x, double n, double p, int lower_tail, int log_p);
     double pbeta(double x, double a, double b, int lower_tail, int log_p);
     double pnorm5(double x, double mu, double sigma, int lower_tail, int log_p);
+    double pt(double x, double n, int lower_tail, int log_p);
     
     double fmax2(double x, double y);
     double sinpi(double x);

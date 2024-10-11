@@ -1,6 +1,7 @@
 
 cpp = g++
 cc  = gcc
+debug = -g -O0 -fno-inline
 
 lib = -lopencv_gapi -lopencv_stitching -lopencv_alphamat -lopencv_aruco \
       -lopencv_bgsegm -lopencv_bioinspired -lopencv_ccalib -lopencv_cvv \
@@ -21,7 +22,7 @@ lib = -lopencv_gapi -lopencv_stitching -lopencv_alphamat -lopencv_aruco \
 all: spblob
 
 spblob: blob.cpp blob.h libdistrib.a
-	$(cpp) blob.cpp blob.h libdistrib.a -I/usr/include/opencv4 $(lib) -o spblob
+	$(cpp) blob.cpp blob.h libdistrib.a -I/usr/include/opencv4 $(lib) -o spblob $(debug)
 
 bratio.o: bratio.c distrib.h 
 	$(cc) bratio.c -lm -c -o bratio.o -fcompare-debug-second -w

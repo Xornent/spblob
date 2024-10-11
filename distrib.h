@@ -364,6 +364,9 @@ double gammafn(double x);
 double dnorm4(double x, double mu, double sigma, int give_log);
 double pnorm5(double x, double mu, double sigma, int lower_tail, int log_p);
 void pnorm_both(double x, double *cum, double *ccum, int i_tail, int log_p);
+double dt(double x, double n, int give_log);
+double pt(double x, double n, int lower_tail, int log_p);
+double lbeta(double a, double b);
 
 #define dnorm dnorm4
 #define pnorm pnorm5
