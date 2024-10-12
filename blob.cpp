@@ -255,7 +255,7 @@ double process(char* file) {
     
     for (int i = 0; i < meeting_points.size(); i ++) {
         for (int j = i + 1; j < meeting_points.size(); j ++) {
-            if (distance(meeting_points[i].second, meeting_points[j].second) < 20.0) {
+            if (distance(meeting_points[i].second, meeting_points[j].second) < 40.0) { // FIXME. CHANGE
                 paired.push_back(std::pair<int, int>(
                     meeting_points[i].first, meeting_points[j].first
                 ));
@@ -268,6 +268,8 @@ double process(char* file) {
     }
 
     // calculate the grayscale on the uncorrected base line.
+
+    std::vector<cv::Mat> rois;
 
     for (int i = 0; i < paired.size(); i++) {
         cv::Point2d v1 = base_vertice[paired[i].first];
@@ -287,8 +289,8 @@ double process(char* file) {
         double dy = vtop.y - vbottom.y;
 
         double testx, testy;
-        testx = origin.x + dy * signy;
-        testy = origin.y + dx * signx;
+        testx = dy * signy;
+        testy = dx * signx;
         double prod = testx * (meet.x - origin.x) + testy * (meet.y - origin.y);
         if (prod < 0) { signx = 1; signy = -1; }
 
@@ -303,13 +305,12 @@ double process(char* file) {
         auto hist = extract_line(scaled_gray, origin, end);
         int length = hist.size();
         double* array = (double*)malloc(sizeof(double) * length);
-        printf("------------------------------");
+
         for (int j = 0; j < length; j++) {
             array[j] = hist[j].first * 1.0;
-            printf("%d\n", hist[j].first);
         }
 
-        plot(length, array, "histogram");
+        // plot(length, array, "histogram");
 
         cv::line(
             annot, cv::Point2d(origin.x / zoom, origin.y / zoom),
@@ -317,36 +318,90 @@ double process(char* file) {
             cv::Scalar(0, 0, 255, 0), 2, 8
         );
 
-        // we will then extract the sharp turning point using a method based on
-        // statistical observation on t-test.
+        double downx = - unify;
+        double downy = + unifx;
+        double upx = + unify;
+        double upy = - unifx;
 
-        auto regions_raw = rmdm(length, array, 0.01, 100);
+        // search for meeting boundary
+
+        int maximal_search_length = int(100. / zoom);
         
-        for (auto reg : regions_raw) {
-            cv::circle(
-                annot,
-                cv::Point2d(
-                    (origin.x + unifx * reg.start) / zoom,
-                    (origin.y + unify * reg.start) / zoom
-                ), 5, cv::Scalar(0, 0, 255, 0), cv::FILLED
+        // here, the 160 and 180 is associated with the default zoom constant
+        // 68.28 (in filter_color) which indicated the zoomed image is set to
+        // a uniform length of 20px of the scale bar.
+
+        cv::Point2d orig_b1((origin.x + unifx * 160.) / zoom, (origin.y + unify * 160.) / zoom); // FIXME: CHANGE
+        cv::Point2d orig_b2((origin.x + unifx * 180.) / zoom, (origin.y + unify * 180.) / zoom); // FIXME: CHANGE
+        int ub1 = boundary(grayscale, orig_b1, cv::Point2d(upx, upy), maximal_search_length, 0.05);
+        int ub2 = boundary(grayscale, orig_b2, cv::Point2d(upx, upy), maximal_search_length, 0.05);
+        int db1 = boundary(grayscale, orig_b1, cv::Point2d(downx, downy), maximal_search_length, 0.05);
+        int db2 = boundary(grayscale, orig_b2, cv::Point2d(downx, downy), maximal_search_length, 0.05);
+        
+        auto ub1p = cv::Point2d((orig_b1.x + upx * ub1), (orig_b1.y + upy * ub1));
+        auto db1p = cv::Point2d((orig_b1.x + downx * db1), (orig_b1.y + downy * db1));
+        auto cp1 = cv::Point2d((ub1p.x + db1p.x) * 0.5 * zoom, (ub1p.y + db1p.y) * 0.5 * zoom);
+
+        auto ub2p = cv::Point2d((orig_b2.x + upx * ub2), (orig_b2.y + upy * ub2));
+        auto db2p = cv::Point2d((orig_b2.x + downx * db2), (orig_b2.y + downy * db2));
+        auto cp2 = cv::Point2d((ub2p.x + db2p.x) * 0.5 * zoom, (ub2p.y + db2p.y) * 0.5 * zoom);
+
+        cv::line(
+            annot, cv::Point2d((orig_b1.x + upx * ub1), (orig_b1.y + upy * ub1)),
+            cv::Point2d((orig_b1.x + downx * db1), (orig_b1.y + downy * db1)),
+            cv::Scalar(0, 0, 255, 0), 3
+        );
+
+        cv::line(
+            annot, cv::Point2d((orig_b2.x + upx * ub2), (orig_b2.y + upy * ub2)),
+            cv::Point2d((orig_b2.x + downx * db2), (orig_b2.y + downy * db2)),
+            cv::Scalar(0, 255, 0, 0), 3
+        );
+
+        // remap and construct regions of interest
+
+        // corrected orientation.
+
+        double corrorientx = cp2.x - cp1.x;
+        double corrorienty = cp2.y - cp1.y;
+        corrorientx /= distance(cp1, cp2);
+        corrorienty /= distance(cp1, cp2);
+
+        double corrupx = + corrorienty;
+        double corrupy = - corrorientx;
+        double corrdownx = - corrorienty;
+        double corrdowny = + corrorientx;
+
+        double width = (upx * corrupx + upy * corrupy) * ((ub1 + db1 + ub2 + db2) * zoom * 0.25);
+        width -= 5; // remove the 5px boundary.
+
+        if (width > 1) {
+            int roih = int(width);
+            int roiw = 250;
+
+            auto roi = extract_flank(
+                scaled_gray, cv::Point2d(cp1.x, cp1.y),
+                cv::Point2d(corrorientx, corrorienty), cv::Point2d(corrupx, corrupy),
+                roih, roiw
             );
 
-            cv::circle(
-                annot,
-                cv::Point2d(
-                    (origin.x + unifx * reg.end) / zoom,
-                    (origin.y + unify * reg.end) / zoom
-                ), 5, cv::Scalar(0, 255, 0, 0), cv::FILLED
-            );
+            rois.push_back(roi);
         }
     }
+
+    // process the roi
 
     auto end = chrono::system_clock::now();
     auto duration = chrono::duration_cast<chrono::milliseconds>(end - start);
     double ms = double(duration.count()) * chrono::milliseconds::period::num /
         chrono::milliseconds::period::den;
 
+    for (auto roi : rois) {
+        show(roi, "roi", 800, 600);
+    }
+
     show(annot, "annotated", 800, 600);
+    
     return ms;
 }
 
@@ -555,7 +610,7 @@ void filter_mean_color(cv::Mat &colored, anchors_t &anchors) {
 
     anchors.detections = filter_indices.size();
     anchors.vertices = array;
-    anchors.zoom = (34.14 / total_length) * zoom;
+    anchors.zoom = (68.28 / total_length) * zoom;
     
 #ifdef verbose
 
@@ -1011,4 +1066,54 @@ double normal(regions_t &r, double x) {
     r.stdvar = sqrt(dev / (n - 1));
 
     return 1 - pnorm(x, r.mean, r.stdvar, TRUE, FALSE);
+}
+
+int boundary(cv::Mat &grayscale, cv::Point2d origin, cv::Point2d step, int maximal, double tolerance) {
+    double o = grayscale.at<uchar>(int(origin.y), int(origin.x)) * 1.0;
+    
+    for (float i = 0; i <= maximal; ++i) {
+        int posy = int(origin.y) + int(round(i * step.y));
+        int posx = int(origin.x) + int(round(i * step.x));
+
+        if (posx > grayscale.cols) continue;
+        if (posy > grayscale.rows) continue;
+        if (posx < 0) continue;
+        if (posy < 0) continue;
+
+        uchar c = grayscale.at<uchar>(posy, posx);
+        if (c < 150) return i;
+    }
+
+    return maximal;
+}
+
+cv::Mat extract_flank(
+    cv::Mat &grayscale, cv::Point2d origin,
+    cv::Point2d orient, cv::Point2d up,
+    int flank, int extend
+) {
+    int width = extend;
+    int height = 2 * flank + 1;
+
+    cv::Mat roi = cv::Mat::zeros(cv::Size(width, height), CV_8U);
+    for (int h = - flank; h <= + flank; h ++) {
+        for (int w = 0; w < width; w ++) {
+            
+            cv::Point mapped(
+                int(origin.x + w * orient.x + h * up.x),
+                int(origin.y + w * orient.y + h * up.y)
+            );
+
+            cv::Point target(w, flank - h);
+
+            if (mapped.x > grayscale.cols) continue;
+            if (mapped.y > grayscale.rows) continue;
+            if (mapped.x < 0) continue;
+            if (mapped.y < 0) continue;
+
+            roi.at<uchar>(target.y, target.x) = grayscale.at<uchar>(mapped.y, mapped.x);
+        }
+    }
+
+    return roi;
 }

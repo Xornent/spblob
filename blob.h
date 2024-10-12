@@ -47,6 +47,14 @@ int amax(int n, double* arr);
 int imin(int n, double* arr);
 int amin(int n, double* arr);
 
+int boundary(cv::Mat &grayscale, cv::Point2d origin, cv::Point2d step, int maximal, double tolerance);
+
+cv::Mat extract_flank(
+    cv::Mat &grayscale, cv::Point2d origin,
+    cv::Point2d orient, cv::Point2d up,
+    int flank, int extend
+);
+
 void plot(int n, double vec[], const char* title);
 void show(cv::Mat &matrix, const char* window, int width = 800, int height = 600);
 
