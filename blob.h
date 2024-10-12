@@ -27,19 +27,8 @@ std::vector< std::pair< uchar, int >> extract_line(
 
 double distance(cv::Point2d p1, cv::Point2d p2);
 
-typedef struct regions {
-    int start;
-    int end;
-    double values[400];
-    double mean;
-    double stdvar;
-} regions_t;
-
-int rmdm_rec(int n, double* arr, double cutoff, std::vector<int> &seps, int start, int round);
-std::vector<regions_t> rmdm(int n, double* arr, double cutoff, int round);
-std::vector<regions_t> seqseg(int n, double* arr, int boot, double cutoff, double zcutoff, int skip);
 double levene(int n1, int n2, double* arr1, double* arr2);
-double normal(regions_t &r, double x);
+double normal(int n, double* arr, double x);
 double t(int n1, int n2, double* arr1, double* arr2);
 
 int imax(int n, double* arr);
@@ -48,6 +37,8 @@ int imin(int n, double* arr);
 int amin(int n, double* arr);
 
 int boundary(cv::Mat &grayscale, cv::Point2d origin, cv::Point2d step, int maximal, double tolerance);
+uchar bilinear(uchar p1, uchar p2, uchar p3, uchar p4, double x, double y);
+uchar get_bilinear(cv::Mat &grayscale, double x, double y);
 
 cv::Mat extract_flank(
     cv::Mat &grayscale, cv::Point2d origin,

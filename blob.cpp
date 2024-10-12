@@ -429,7 +429,7 @@ double process(char* file) {
 
     // process the roi
 
-    
+
 
     auto end = chrono::system_clock::now();
     auto duration = chrono::duration_cast<chrono::milliseconds>(end - start);
@@ -911,107 +911,6 @@ double distance(cv::Point2d p1, cv::Point2d p2) {
     return sqrt(pow(p1.x - p2.x, 2) + pow(p1.y - p2.y, 2));
 }
 
-std::vector<regions_t> seqseg(int n, double* arr, int boot, double cutoff, double zcutoff, int skip) {
-    static std::vector<regions_t> res;
-    res.clear();
-    
-    regions_t* current = NULL;
-    for (int i = 0; i < n; i ++) {
-
-        if (current == NULL) {
-            current = (regions_t*) malloc(sizeof(regions_t));
-            current -> start = i;
-            current -> end = i + boot - 1 > n ? n : i + boot - 1;
-
-            for (int j = current -> start; j <= current -> end; j ++)
-                current -> values[j -  current -> start] = (arr[j]);
-            i = current -> end;
-            continue;
-        }
-
-        else {
-
-            int next_start = i;
-            int next_end = i + boot - 1 > n ? n : i + boot - 1;
-            double* an = (double*) malloc(sizeof(double) * (next_end - next_start + 1));
-            for (int j = 0; j <= next_end - next_start; j ++) an[j] = arr[next_start + j];
-
-            double lev = levene(
-                current -> end - current -> start + 1,
-                next_end - next_start + 1,
-                current -> values, an);
-
-            if (lev < cutoff) {
-                for (int j = next_start; j <= next_end; j ++) {
-                    double z = normal(*current, arr[j]);
-                    
-                    if (z >= zcutoff) {
-                        current -> end = j;
-                        current -> values[j - current -> start] = (arr[j]);
-                        i = j;
-
-                    } else {
-                        i = j + skip;
-                        res.push_back(*current);
-                        current = NULL;
-                        break;
-                    }
-                }
-
-            } else {
-                for (int j = next_start; j <= next_end; j ++)
-                    current -> values[j - current -> start] = (arr[j]);
-                current -> end = next_end;
-                i = next_end;
-                continue;
-            }
-        }
-    }
-
-    return res;
-}
-
-#define rmdm_boot 5
-
-int rmdm_rec(int n, double* arr, double cutoff, std::vector<int> &seps, int start, int round) {
-
-    if (n < 2 * rmdm_boot) return -1;
-    if (round <= 0) return -1;
-
-    double* t_vals = (double*) malloc(sizeof(double) * (n - 2 * rmdm_boot + 1));
-    for (int i = rmdm_boot; i < n - rmdm_boot + 1; i ++)
-        t_vals[i - rmdm_boot] = fabs(t(i, n - i, arr, (arr + i)));
-    double tmax = amax(n - (2 * rmdm_boot - 1), t_vals);
-    int idtmax = imax(n - (2 * rmdm_boot - 1), t_vals);
-    double p = 1 - pt(tmax, n - 1, TRUE, FALSE);
-    
-    if (p < cutoff) {
-        seps.push_back(idtmax + rmdm_boot + start);
-        rmdm_rec(idtmax + rmdm_boot, arr, cutoff, seps, start, round - 1);
-        rmdm_rec(n - idtmax - rmdm_boot, arr + idtmax, cutoff, seps, start + idtmax + rmdm_boot, round - 1);
-    }
-
-    return idtmax + rmdm_boot + start;
-}
-
-std::vector<regions_t> rmdm(int n, double* arr, double cutoff, int round) {
-    std::vector<int> bounds;
-    rmdm_rec(n, arr, cutoff, bounds, 0, round);
-    sort(bounds.begin(), bounds.end());
-    
-    std::vector<regions_t> regions;
-    int prev = 0;
-    for (int n : bounds) {
-        regions_t* reg = (regions_t*) malloc(sizeof(regions_t));
-        reg -> start = prev;
-        reg -> end = n - 1;
-        prev = n;
-        regions.push_back(*reg);
-    }
-
-    return regions;
-}
-
 double levene(int n1, int n2, double* arr1, double* arr2) {
 
     double* deviance1 = (double*) malloc(sizeof(double) * n1);
@@ -1095,18 +994,17 @@ int amin(int n, double* arr) {
    return m;
 }
 
-double normal(regions_t &r, double x) {
+double normal(int n, double* arr, double x) {
     
     double sum = 0;
     double dev = 0;
-    size_t n = r.end - r.start + 1;
 
-    for (int i = 0; i < n; i++) sum += r.values[i];
-    for (int i = 0; i < n; i++) dev += pow(r.values[i] - (sum / n), 2);
-    r.mean = sum / n;
-    r.stdvar = sqrt(dev / (n - 1));
+    for (int i = 0; i < n; i++) sum += arr[i];
+    for (int i = 0; i < n; i++) dev += pow(arr[i] - (sum / n), 2);
+    int mean = sum / n;
+    int stdvar = sqrt(dev / (n - 1));
 
-    return 1 - pnorm(x, r.mean, r.stdvar, TRUE, FALSE);
+    return 1 - pnorm(x, mean, stdvar, TRUE, FALSE);
 }
 
 int boundary(cv::Mat &grayscale, cv::Point2d origin, cv::Point2d step, int maximal, double tolerance) {
