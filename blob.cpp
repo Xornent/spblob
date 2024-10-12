@@ -376,6 +376,7 @@ double process(char* file) {
         width -= 5; // remove the 5px boundary.
 
         if (width > 1) {
+
             int roih = int(width);
             int roiw = 250;
 
@@ -385,16 +386,56 @@ double process(char* file) {
                 roih, roiw
             );
 
+            // second round detection, in the first round detection, we may find
+            // that the small interval may introduce great error of orientation,
+            // so we attempt to locate the right boundary line and perform a
+            // second correction. if the line that match our criteria is not
+            // found, we will just skip this process.
+
+            std::vector< cv::Vec2f > lines;
+            
+            cv::Mat blurred;
+            cv::GaussianBlur(roi, blurred, cv::Size(5, 5), 0);
+            
+            cv::Mat canny_roi;
+            cv::Mat blur_usm, usm;
+            cv::GaussianBlur(blurred, blur_usm, cv::Size(0, 0), 25);
+            cv::addWeighted(blurred, 1.5, blur_usm, -0.5, 0, usm);
+            cv::Canny(usm, canny_roi, 50, 100);
+
+            cv::HoughLines(canny_roi, lines, 1, CV_PI / 180., 50);
+
+            for (auto line : lines) {
+
+                float rho = line[0], theta = line[1];
+
+                double sin_theta = sin(theta), cos_theta = cos(theta);
+                double x = rho * cos_theta, y = rho * sin_theta;
+
+                cv::Point pt1, pt2;
+                pt1.x = round(x + 1000 * (-sin_theta));
+                pt1.y = round(y + 1000 * (cos_theta));
+                pt2.x = round(x - 1000 * (-sin_theta));
+                pt2.y = round(y - 1000 * (cos_theta));
+
+                if (fabs(cos_theta) > 0.85) {
+                    cv::line(roi, pt1, pt2, cv::Scalar(0), 2);
+                }
+            }
+
             rois.push_back(roi);
         }
     }
 
     // process the roi
 
+    
+
     auto end = chrono::system_clock::now();
     auto duration = chrono::duration_cast<chrono::milliseconds>(end - start);
     double ms = double(duration.count()) * chrono::milliseconds::period::num /
         chrono::milliseconds::period::den;
+    
 
     for (auto roi : rois) {
         show(roi, "roi", 800, 600);
@@ -1087,6 +1128,42 @@ int boundary(cv::Mat &grayscale, cv::Point2d origin, cv::Point2d step, int maxim
     return maximal;
 }
 
+uchar bilinear(uchar p1, uchar p2, uchar p3, uchar p4, double x, double y) {
+    double x1 = (p1 + (p2 - p1) * x);
+    double x2 = (p3 + (p4 - p3) * x);
+    return uchar(int(x1 + (x2 - x1) * y));
+}
+
+uchar get_bilinear(cv::Mat &grayscale, double x, double y) {
+    int borderx = -1, bordery = -1;
+    if (x < 0) borderx = 0;
+    if (y < 0) bordery = 0;
+    if (x >= grayscale.cols) borderx = grayscale.cols - 1;
+    if (y >= grayscale.rows) bordery = grayscale.rows - 1;
+
+    if (borderx != -1 && bordery != -1) return grayscale.at<uchar>(bordery, borderx);
+    
+    if (borderx != -1) {
+        uchar y1 = grayscale.at<uchar>(int(floor(y)), borderx);
+        uchar y2 = grayscale.at<uchar>(int(ceil(y)), borderx);
+        return uchar(int(y1 + (y2 - y1) * (y - floor(y))));
+    }
+
+    if (bordery != -1) {
+        uchar x1 = grayscale.at<uchar>(bordery, int(floor(x)));
+        uchar x2 = grayscale.at<uchar>(bordery, int(ceil(x)));
+        return uchar(int(x1 + (x2 - x1) * (x - floor(x))));
+    }
+
+    return bilinear(
+        grayscale.at<uchar>(int(floor(y)), int(floor(x))),
+        grayscale.at<uchar>(int(floor(y)), int(ceil(x))),
+        grayscale.at<uchar>(int(ceil(y)), int(floor(x))),
+        grayscale.at<uchar>(int(ceil(y)), int(ceil(x))),
+        x - floor(x), y - floor(y)
+    );
+}
+
 cv::Mat extract_flank(
     cv::Mat &grayscale, cv::Point2d origin,
     cv::Point2d orient, cv::Point2d up,
@@ -1099,9 +1176,9 @@ cv::Mat extract_flank(
     for (int h = - flank; h <= + flank; h ++) {
         for (int w = 0; w < width; w ++) {
             
-            cv::Point mapped(
-                int(origin.x + w * orient.x + h * up.x),
-                int(origin.y + w * orient.y + h * up.y)
+            cv::Point2d mapped(
+                origin.x + w * orient.x + h * up.x,
+                origin.y + w * orient.y + h * up.y
             );
 
             cv::Point target(w, flank - h);
@@ -1111,7 +1188,8 @@ cv::Mat extract_flank(
             if (mapped.x < 0) continue;
             if (mapped.y < 0) continue;
 
-            roi.at<uchar>(target.y, target.x) = grayscale.at<uchar>(mapped.y, mapped.x);
+            roi.at<uchar>(target.y, target.x) =
+                get_bilinear(grayscale, mapped.x, mapped.y);
         }
     }
 
