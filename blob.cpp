@@ -467,22 +467,38 @@ double process(char *file, bool show_msg)
         cv::Mat green(roi.size(), CV_8UC3, cv::Scalar(0, 255, 0));
         cv::Mat blue(roi.size(), CV_8UC3, cv::Scalar(255, 0, 0));
 
+#define higher_reach 4
+
         bool detected = false;
-        int maxiter = 8;
-        double finethresh = 0.0781 * 1.25 * 1.25;
-        double coarsethresh = 0.1875 * 1.25 * 1.25; 
+        int maxiter = 4 + higher_reach;
+
+        double fthreshs[4 + higher_reach] = {
+            0.02,   0.025,  0.032,  0.04,   0.05, 
+            0.0625, 0.0781, 0.0977 /*, 0.122,
+            0.15,   0.18,   0.22 */
+        };
+
+        double cthreshs[4 + higher_reach] = {
+            0.045,  0.056,  0.07,   0.09,   0.12,
+            0.15,   0.1875, 0.2344 /*, 0.29,
+            0.36,   0.5,   0.75 */
+        };
+
+        double finethresh = fthreshs[3 + higher_reach];
+        double coarsethresh = cthreshs[3 + higher_reach]; 
+        double circularity;
 
         while ((!detected) && maxiter > 0) {
 
             maxiter -= 1;
-            finethresh *= 0.8;
-            coarsethresh *= 0.8;
+            finethresh = fthreshs[maxiter];
+            coarsethresh = cthreshs[maxiter];
             bgstrict = cv::Mat::zeros(roi.size(), CV_8U);
             bgloose = cv::Mat::zeros(roi.size(), CV_8U);
             
             cv::cvtColor(roi, ol, cv::COLOR_GRAY2BGR);
 
-            if (show_msg) printf("  [.] performing infection for %d ... \n", croi);
+            if (show_msg) printf("  [.] performing infection for %d ... \r", croi);
             infect(usms.at(croi - 1), bgstrict, cv::Point(1, (roi.rows - 1) / 2 + 1), finethresh);
             infect(usms.at(croi - 1), bgloose, cv::Point(1, (roi.rows - 1) / 2 + 1), coarsethresh);
 
@@ -518,6 +534,7 @@ double process(char *file, bool show_msg)
                         cv::drawContours(
                             ol, contours, idc, cv::Scalar(0, 0, 255), 2
                         );
+                        circularity = ratio;
                         detected = true;
                         break;
                     }
@@ -537,6 +554,77 @@ double process(char *file, bool show_msg)
         // the gradients border of natural color. if the effects are mild, we
         // will just solve the problem by the 2 or 3 times of dilation when counting
         // but sometimes the shape itself is far from round and the loss cannot be reversed
+
+        bool nextround = true;
+        bool update = false;
+        cv::Mat backup_fg, backup_ol;
+        fg.copyTo(backup_fg);
+        ol.copyTo(backup_ol);
+
+        while (detected && nextround) {
+            
+            coarsethresh *= 0.64;
+            bgloose = cv::Mat::zeros(roi.size(), CV_8U);
+
+            if (show_msg) printf("  [.] correcting infection for %d ... \r", croi);
+            infect(usms.at(croi - 1), bgloose, cv::Point(1, (roi.rows - 1) / 2 + 1), coarsethresh);
+
+            // extract the foreground from the looser background, as an inner circle
+
+            cv::Mat kernel_full = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 3));
+            cv::Mat morph;
+
+            cv::morphologyEx(bgloose, morph, cv::MORPH_CLOSE, kernel_full, cv::Point(-1, -1), 1);
+            reverse(morph);
+            cv::morphologyEx(morph, morph, cv::MORPH_CLOSE, kernel_full, cv::Point(-1, -1), 2);
+
+            // extract the central circle.
+
+            std::vector<std::vector<cv::Point>> contours;
+            cv::findContours(morph, contours, cv::RETR_TREE, cv::CHAIN_APPROX_SIMPLE);
+
+            int idc = 0;
+            bool hasany = false;
+            for (auto cont : contours) {
+                double lenconts = cv::arcLength(cont, true);
+                double area = cv::contourArea(cont, false);
+                double ratio = lenconts * lenconts / area;
+                
+                // the circularity ratio should decrease (more circular)
+                // after each iteration.
+
+                if (area > 3000 && area < 50000) {
+                    
+                    // update the foreground mask.
+
+                    int collapse_right = any_right(fg, fg.cols - 20);
+                    if (collapse_right < 10) {
+                        if (ratio < circularity * 0.95) {
+                            backup_fg = cv::Mat::zeros(roi.size(), CV_8U);
+                            cv::drawContours(backup_fg, contours, idc, cv::Scalar(255), cv::FILLED);
+                            cv::drawContours(
+                                backup_ol, contours, idc, cv::Scalar(0, 255, 0), 2);
+                            hasany = true;
+                            update = true;
+                            circularity = ratio;
+
+                        } else nextround = false;
+                        break;
+                    }
+                }
+
+                idc ++;
+            }
+
+            if (!hasany) {
+                nextround = false;
+            }
+        }
+
+        if (update) {
+            backup_fg.copyTo(fg);
+            backup_ol.copyTo(ol);
+        }
 
         // draw the visualization map.
 
@@ -662,7 +750,7 @@ double process(char *file, bool show_msg)
 
     // note that `overlap` is not of the same length
 
-    if (show_msg) printf("  [.] data begin \n\n");
+    if (show_msg) printf("\n  [.] data begin \n\n");
 
     // table header
 
@@ -1533,13 +1621,6 @@ int infect_cell(
     if (y == height - 1)
         do_bottom = false;
 
-    // penalty
-
-    if (do_left) if(flag[y][x - 1] == 2) return 0;
-    if (do_right) if(flag[y][x + 1] == 2) return 0;
-    if (do_top) if(flag[y - 1][x] == 2) return 0;
-    if (do_bottom) if(flag[y + 1][x] == 2) return 0;
-
     int is_dirty = 0;
 
 #define infect_point(_x, _y)                                    \
@@ -1550,7 +1631,7 @@ int infect_cell(
         else                                                    \
         {                                                       \
             double mbg = mean(bg.size(), bg.data());            \
-            double pval = fabs((inp[_y][_x] * 1.) - mbg) / mbg; \
+            double pval = (mbg - (inp[_y][_x] * 1.)) / mbg;     \
             if (pval > cutoff)                                  \
             {                                                   \
                 flag[_y][_x] = 2;                               \
@@ -1566,14 +1647,29 @@ int infect_cell(
         }                                                       \
     }
 
-    if (do_left)
+    if (do_left) {
         infect_point(x - 1, y);
-    if (do_right)
+        if (do_top) infect_point(x - 1, y - 1);
+        if (do_bottom) infect_point(x - 1, y + 1);
+    }
+
+    if (do_right) {
         infect_point(x + 1, y);
-    if (do_top)
+        if (do_top) infect_point(x + 1, y - 1);
+        if (do_bottom) infect_point(x + 1, y + 1);
+    }
+
+    if (do_top) {
         infect_point(x, y - 1);
-    if (do_bottom)
+        if (do_left) infect_point(x - 1, y - 1);
+        if (do_right) infect_point(x + 1, y - 1);
+    }
+
+    if (do_bottom) {
         infect_point(x, y + 1);
+        if (do_left) infect_point(x - 1, y + 1);
+        if (do_right) infect_point(x + 1, y + 1);
+    }
 
 #undef infect_point
 
