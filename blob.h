@@ -7,7 +7,7 @@ typedef struct anchors {
     double zoom;
 } anchors_t;
 
-double process(char* file);
+double process(char* file, bool show_msg);
 
 void anchor(cv::Mat &image, anchors_t &anchors, double prepzoom);
 void filter_mean_color(cv::Mat &colored, anchors_t &anchors);
@@ -49,6 +49,15 @@ void extract_flank(
 
 void plot(int n, double vec[], const char* title);
 void show(cv::Mat &matrix, const char* window, int width = 800, int height = 600);
+void hist(cv::Mat &grayscale, cv::Mat mask);
+int quartile(cv::Mat &grayscale, cv::Mat mask, double lower);
+int any(cv::Mat &binary);
+
+inline double au(
+    double foremean, int foresize,
+    double backstct, double backlse,
+    int dark, int light, double refsize
+);
 
 // do not directly use distrib.h.  it is the internal header for the statistics
 // library, the useful and clean export for libdistrib is written here.

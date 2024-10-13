@@ -84,7 +84,6 @@ int main(int argc, char *argv[])
 
     if (strcmp(argv[1], "-d") == 0)
     {
-
         char *dir = argv[2];
         std::string path(dir);
         for (const auto &entry : fs::directory_iterator(path))
@@ -92,22 +91,22 @@ int main(int argc, char *argv[])
             if (!entry.is_directory())
             {
                 printf("processing %s ... ", (char *)(entry.path().filename().c_str()));
-                double dur = process((char *)(entry.path().c_str()));
+                double dur = process((char *)(entry.path().c_str()), true);
                 printf(" %.4f s\n", dur);
             }
         }
     }
     else
     {
-        printf("processing %s ... ", argv[1]);
-        double dur = process(argv[1]);
-        printf("\n< %.4f s\n", dur);
+        printf("processing %s ... \n", argv[1]);
+        double dur = process(argv[1], true);
+        printf("< %.4f s\n", dur);
     }
 
     return 0;
 }
 
-double process(char *file)
+double process(char *file, bool show_msg)
 {
 
     // read the specified image in different color spaces.
@@ -121,7 +120,6 @@ double process(char *file)
     cv::Mat component_red;
     grayscale.copyTo(component_red);
     color_significance(colored_hsv, component_red, 0.0);
-    show(component_red, "red", 800, 600);
 
     cv::Mat annot;
     colored.copyTo(annot);
@@ -152,7 +150,7 @@ double process(char *file)
         for (int w = 0; w < grayscale.size().width - roisize; w += roisize / 2)
         {
 
-            printf(". processing (%d, %d) out of (%d, %d)\n", h, w, totalh, totalw);
+            printf("  [.] processing (%d, %d) out of (%d, %d)\n", h, w, totalh, totalw);
             cv::Rect roi(w, h, roisize, roisize);
             cv::Mat grayscale_roi(component_red, roi);
             cv::Mat colored_roi(colored, roi);
@@ -285,6 +283,7 @@ double process(char *file)
     // calculate the grayscale on the uncorrected base line.
 
     std::vector<cv::Mat> rois;
+    std::vector<cv::Mat> scales;
     std::vector<cv::Mat> usms;
     std::vector<bool> pass1;
 
@@ -326,21 +325,11 @@ double process(char *file)
 
         cv::Point2d end(
             origin.x + dy * 4.5 * signy,
-            origin.y + dx * 4.5 * signx);
+            origin.y + dx * 4.5 * signx
+        );
 
         double unify = dx * signx / sqrt(pow(dx, 2) + pow(dy, 2));
         double unifx = dy * signy / sqrt(pow(dx, 2) + pow(dy, 2));
-
-        auto hist = extract_line(scaled_gray, origin, end);
-        int length = hist.size();
-        double *array = (double *)malloc(sizeof(double) * length);
-
-        for (int j = 0; j < length; j++)
-        {
-            array[j] = hist[j].first * 1.0;
-        }
-
-        // plot(length, array, "histogram");
 
         cv::line(
             annot, cv::Point2d(origin.x / zoom, origin.y / zoom),
@@ -351,6 +340,14 @@ double process(char *file)
         double downy = +unifx;
         double upx = +unify;
         double upy = -unifx;
+
+        cv::Mat scale_bar;
+        extract_flank(
+            scaled_gray, scale_bar, origin, cv::Point2d(unifx, unify),
+            cv::Point2d(upx, upy), (distance(vtop, vbottom) / 2 - 3), 125 // FIXME: CHANGE
+        );
+
+        scales.push_back(scale_bar);
 
         // search for meeting boundary
 
@@ -422,7 +419,8 @@ double process(char *file)
             extract_flank(
                 scaled_gray, roi, cv::Point2d(cp1.x, cp1.y),
                 cv::Point2d(corrorientx, corrorienty), cv::Point2d(corrupx, corrupy),
-                roih, roiw);
+                roih, roiw
+            );
 
             // second round detection, in the first round detection, we may find
             // that the small interval may introduce great error of orientation,
@@ -449,11 +447,16 @@ double process(char *file)
     std::vector< cv::Mat > back_loose;
     std::vector< cv::Mat > foreground;
     std::vector< cv::Mat > overlap;
+    std::vector< bool > has_foreground;
     int croi = 0;
     for (auto roi : rois)
     {
         if (!pass1.at(croi)) {
-            printf("\n  detection not passed correction test.");
+            back_strict.push_back(cv::Mat(cv::Size(3, 3), CV_8U, cv::Scalar(0)));
+            back_loose.push_back(cv::Mat(cv::Size(3, 3), CV_8U, cv::Scalar(0)));
+            foreground.push_back(cv::Mat(cv::Size(3, 3), CV_8U, cv::Scalar(0)));
+            overlap.push_back(cv::Mat(cv::Size(3, 3), CV_8U, cv::Scalar(0)));
+            has_foreground.push_back(false);
             croi += 1;
             continue;
         }
@@ -480,7 +483,7 @@ double process(char *file)
 
             cv::cvtColor(roi, ol, cv::COLOR_GRAY2BGR);
 
-            printf("\n  performing infection for %d ... ", croi);
+            if (show_msg) printf("  [.] performing infection for %d ... \n", croi);
             infect(usms.at(croi - 1), bgstrict, cv::Point(1, (roi.rows - 1) / 2 + 1), finethresh);
             infect(usms.at(croi - 1), bgloose, cv::Point(1, (roi.rows - 1) / 2 + 1), coarsethresh);
 
@@ -533,19 +536,152 @@ double process(char *file)
         back_loose.push_back(bgloose);
         foreground.push_back(fg);
         overlap.push_back(ol);
+        has_foreground.push_back(detected);
     }
+
+    // here, we will extract the scale mark and reads some of the critical
+    // information from the scale mark image for finer adjustments.
+
+    std::vector< uchar > scale_dark;
+    std::vector< uchar > scale_light;
+    std::vector< double > scale_size;
+    std::vector< bool > scale_success;
+    for (auto sc : scales)
+    {
+        cv::Mat blurred;
+        cv::GaussianBlur(sc, blurred, cv::Size(5, 5), 0);
+
+        cv::Mat blur_usm, usm;
+        cv::GaussianBlur(blurred, blur_usm, cv::Size(0, 0), 25);
+        cv::addWeighted(blurred, 1.5, blur_usm, -0.5, 0, usm);
+        blur_usm.release();
+
+        std::vector< cv::Vec3f > circles;
+        cv::HoughCircles(usm, circles, cv::HOUGH_GRADIENT, 1, 10, 40, 50, 10, 60);
+        cv::Mat darker_mask(sc.size(), CV_8U, cv::Scalar(0));
+        cv::Mat lighter_mask(sc.size(), CV_8U, cv::Scalar(255));
+
+        for (auto circ : circles) {
+            cv::circle(sc, cv::Point2d(circ[0], circ[1]), circ[2], cv::Scalar(0), 2);
+            
+            cv::circle(
+                darker_mask,
+
+                // relatively shrink the circle to make the darker area more pure.
+
+                cv::Point2d(circ[0], circ[1]), circ[2] - 2,
+                cv::Scalar(255), cv::FILLED
+            );
+
+            cv::circle(
+                lighter_mask,
+
+                // relatively extends the circle, note that the two small red
+                // triangle marks lies within lighter mask but with distinct
+                // grayscale compared to the background. we may just use the 
+                // median filter to ignore them.
+
+                cv::Point2d(circ[0], circ[1]), circ[2] + 4,
+                cv::Scalar(0), cv::FILLED
+            );
+        }
+
+        scale_dark.push_back(quartile(sc, darker_mask, 0.40));
+        scale_light.push_back(quartile(sc, lighter_mask, 0.60));
+        
+        if (circles.size() == 1) {
+            scale_success.push_back(true);
+            scale_size.push_back(CV_PI * pow(circles[0][2], 2));
+        } else {
+            scale_success.push_back(false);
+            scale_size.push_back(1);
+        }
+    }
+
+    // by now, all the detection works are done. and we will pretty-print the
+    // data for further analysis by other software
+
+    // here we have, in lengths of total scale detections:
+
+    // std::vector<cv::Mat> rois;            raw image
+    // std::vector<cv::Mat> scales;          raw scale image
+    // std::vector<cv::Mat> usms;            sharpened raw image
+    // std::vector<bool> pass1;              pass for clipping flank orientation
+
+    // std::vector< uchar > scale_dark;      darker principle grayscale
+    // std::vector< uchar > scale_light;     lighter principle grayscale
+    // std::vector< double > scale_size;     scale circle size
+    // std::vector< bool > scale_success;    no exception in the scale recognition
+
+    // std::vector< cv::Mat > back_strict;   stricter background mask
+    // std::vector< cv::Mat > back_loose;    looser background mask
+    // std::vector< cv::Mat > foreground;    foreground mask
+    // std::vector< bool > has_foreground;   has a foreground detection
+
+    // note that `overlap` is not of the same length
+
+    if (show_msg) printf("  [.] data begin \n\n");
+
+    // table header
+
+    printf("  [..]  orient  scale  fore  fore.mean  fore.size  back.s.mean  back.l.mean  sc.dark  sc.light  sc.size       [au] \n");
+    printf("  ---- ------- ------ ----- ---------- ---------- ------------ ------------ -------- --------- -------- ---------- \n");
+
+    for (int i = 0; i < rois.size(); i++) {
+        printf("  [%2d] ", i);
+
+        if (pass1.at(i)) printf("      x ");
+        else printf("      . ");
+
+        if (scale_success.at(i)) printf("     x ");
+        else printf("     . ");
+
+        if (has_foreground.at(i)) printf("    x ");
+        else printf("    . ");
+
+        double fm; int fsz;
+        if (has_foreground.at(i)) {
+            cv::Mat kernel_full = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 3));
+            cv::Mat morph;
+
+            cv::morphologyEx(
+                foreground.at(i), morph,
+                cv::MORPH_DILATE, kernel_full,
+                cv::Point(-1, -1), 2
+            );
+
+            auto foremean = cv::mean(rois.at(i), morph);
+            auto masksum = any(morph);
+            fm = foremean[0]; fsz = masksum;
+            printf("    %6.2f %10d ", foremean[0], masksum);
+        } else printf("         .          . ");
+
+        auto backsmean = cv::mean(rois.at(i), back_strict.at(i));
+        auto backlmean = cv::mean(rois.at(i), back_loose.at(i));
+        printf("      %6.2f       %6.2f ", backsmean[0], backlmean[0]);
+
+        printf("%8d %9d ", scale_dark.at(i), scale_light.at(i));
+        if (scale_success.at(i)) {
+            printf("%8.1f ", scale_size.at(i));
+        } else printf("       . ");
+
+        if (pass1.at(i) && scale_success.at(i) && has_foreground.at(i)) {
+            printf("%10.2f ", au(
+                fm, fsz,
+                backsmean[0], backlmean[0],
+                scale_dark.at(i), scale_light.at(i), scale_size.at(i))
+            );
+        } else printf("         . ");
+
+        printf("\n");
+    }
+
+    if (show_msg) printf("\n  [.] data end \n");
 
     auto end = chrono::system_clock::now();
     auto duration = chrono::duration_cast<chrono::milliseconds>(end - start);
     double ms = double(duration.count()) * chrono::milliseconds::period::num /
                 chrono::milliseconds::period::den;
-
-    for (auto roi : overlap)
-    {
-        show(roi, "roi", 800, 600);
-    }
-
-    show(annot, "annotated", 800, 600);
 
     return ms;
 }
@@ -1450,4 +1586,85 @@ void infect(cv::Mat &grayscale, cv::Mat &out, cv::Point init, double cutoff)
             point, nexts, bg, cutoff);
         nexts.pop();
     }
+}
+
+void hist(cv::Mat &grayscale, cv::Mat mask) {
+    
+    const int channels[] = { 0 };
+	cv::Mat hist;
+	int dims = 1;
+	const int histSize[] = { 256 };
+
+	float pranges[] = { 0, 255 }; // for dimension 0.
+	const float* ranges[] = { pranges };
+	
+	cv::calcHist(
+        &grayscale, 1, channels, mask, hist, dims,
+        histSize, ranges, true, false
+    );
+
+    int scale = 2;
+	int hist_height = 256;
+	cv::Mat hist_img = cv::Mat::zeros(hist_height, 256 * scale, CV_8UC3);
+	
+    double max_val;
+	cv::minMaxLoc(hist, 0, &max_val, 0, 0);
+
+	for (int i = 0; i < 256; i++)
+	{
+		float bin_val = hist.at<float>(i);
+		int intensity = cvRound(bin_val*hist_height / max_val);
+		cv::rectangle(
+            hist_img, cv::Point(i * scale, hist_height - 1),
+            cv::Point((i + 1) * scale - 1, hist_height - intensity),
+            cv::Scalar(255, 255, 255)
+        );
+	}
+
+    show(hist_img, "histogram");
+}
+
+int quartile(cv::Mat &grayscale, cv::Mat mask, double lower) {
+    
+    const int channels[] = { 0 };
+	cv::Mat histo;
+	int dims = 1;
+	const int histSize[] = { 256 };
+
+	float pranges[] = { 0, 255 }; // for dimension 0.
+	const float* ranges[] = { pranges };
+	
+	cv::calcHist(
+        &grayscale, 1, channels, mask, histo, dims,
+        histSize, ranges, true, false
+    );
+    
+    float sum, accum;
+    for (int i = 0; i < 256; i++) sum += histo.at<float>(i);
+    for (int i = 0; i < 256; i++) {
+        accum += histo.at<float>(i);
+        if (accum > sum * lower) return i;
+    }
+
+    hist(grayscale, mask);
+    return 255;
+}
+
+int any(cv::Mat &binary) {
+    int count;
+    for (int r = 0; r < binary.rows; r ++) {
+        auto ptr = binary.ptr(r);
+        for(int c = 0; c < binary.cols; c ++) {
+            if (ptr[c] > 0) count += 1;
+        }
+    }
+    return count;
+}
+
+inline double au(
+    double foremean, int foresize,
+    double backstct, double backlse,
+    int dark, int light, double refsize
+) {
+    return (backstct - foremean) * foresize;
 }
