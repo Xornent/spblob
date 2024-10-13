@@ -468,19 +468,18 @@ double process(char *file, bool show_msg)
         cv::Mat blue(roi.size(), CV_8UC3, cv::Scalar(255, 0, 0));
 
         bool detected = false;
-        int maxiter = 4;
-        double finethresh = 0.0781;
-        double coarsethresh = 0.1875; 
+        int maxiter = 8;
+        double finethresh = 0.0781 * 1.25 * 1.25;
+        double coarsethresh = 0.1875 * 1.25 * 1.25; 
 
-        while (!detected && maxiter > 0) {
+        while ((!detected) && maxiter > 0) {
 
             maxiter -= 1;
             finethresh *= 0.8;
             coarsethresh *= 0.8;
             bgstrict = cv::Mat::zeros(roi.size(), CV_8U);
             bgloose = cv::Mat::zeros(roi.size(), CV_8U);
-            fg = cv::Mat::zeros(roi.size(), CV_8U);
-
+            
             cv::cvtColor(roi, ol, cv::COLOR_GRAY2BGR);
 
             if (show_msg) printf("  [.] performing infection for %d ... \n", croi);
@@ -509,11 +508,20 @@ double process(char *file, bool show_msg)
                 double area = cv::contourArea(cont, false);
                 double ratio = lenconts * lenconts / area;
 
-                if (ratio > 3 * CV_PI && ratio < 6 * CV_PI &&
-                    area > 3000 && area < 6000) {
-                    cv::drawContours(ol, contours, idc, cv::Scalar(0, 0, 255), 2);
+                if (area > 3000 && area < 50000) {
+
+                    fg = cv::Mat::zeros(roi.size(), CV_8U);
                     cv::drawContours(fg, contours, idc, cv::Scalar(255), cv::FILLED);
-                    detected = true;
+
+                    int collapse_right = any_right(fg, fg.cols - 20);
+                    if (collapse_right < 10) {
+                        cv::drawContours(
+                            ol, contours, idc, cv::Scalar(0, 0, 255), 2
+                        );
+                        detected = true;
+                        break;
+                    }
+
                 } else {
                     cv::drawContours(ol, contours, idc, cv::Scalar(0, 0, 0), 1);
                 }
@@ -521,6 +529,14 @@ double process(char *file, bool show_msg)
                 idc ++;
             }
         }
+
+        // TODO: the higher threshold may be too invasive for the circle detection.
+        // however, for some images (where objects are too sticked to the border)
+        // such invasiveness is required to strip the subject from the 
+        // surroundings. however, these objects may not be round, and may lose
+        // the gradients border of natural color. if the effects are mild, we
+        // will just solve the problem by the 2 or 3 times of dilation when counting
+        // but sometimes the shape itself is far from round and the loss cannot be reversed
 
         // draw the visualization map.
 
@@ -556,42 +572,68 @@ double process(char *file, bool show_msg)
         cv::addWeighted(blurred, 1.5, blur_usm, -0.5, 0, usm);
         blur_usm.release();
 
-        std::vector< cv::Vec3f > circles;
-        cv::HoughCircles(usm, circles, cv::HOUGH_GRADIENT, 1, 10, 40, 50, 10, 60);
+        cv::threshold(usm, usm, 0, 255, cv::THRESH_OTSU);
+        reverse(usm);
+        std::vector<std::vector<cv::Point>> contours;
+        cv::findContours(usm, contours, cv::RETR_TREE, cv::CHAIN_APPROX_SIMPLE);
+
         cv::Mat darker_mask(sc.size(), CV_8U, cv::Scalar(0));
         cv::Mat lighter_mask(sc.size(), CV_8U, cv::Scalar(255));
 
-        for (auto circ : circles) {
-            cv::circle(sc, cv::Point2d(circ[0], circ[1]), circ[2], cv::Scalar(0), 2);
-            
-            cv::circle(
-                darker_mask,
+        int cid = 0;
+        int select_id = -1;
+        bool det = false;
+        cv::Mat view; sc.copyTo(view);
 
-                // relatively shrink the circle to make the darker area more pure.
+        for (auto cont : contours) {
+            double lenconts = cv::arcLength(cont, true);
+            double area = cv::contourArea(cont, false);
+            double ratio = lenconts * lenconts / area;
 
-                cv::Point2d(circ[0], circ[1]), circ[2] - 2,
-                cv::Scalar(255), cv::FILLED
-            );
+            if (area > 1000) {
+                
+                det = true;
+                select_id = cid;
 
-            cv::circle(
-                lighter_mask,
+                // the contour circles the darker part of the image,
+                // but need to keep out the red triangles.
 
-                // relatively extends the circle, note that the two small red
-                // triangle marks lies within lighter mask but with distinct
-                // grayscale compared to the background. we may just use the 
-                // median filter to ignore them.
+                cv::drawContours(
+                    view, contours, cid,
+                    cv::Scalar(255), cv::FILLED
+                );
 
-                cv::Point2d(circ[0], circ[1]), circ[2] + 4,
-                cv::Scalar(0), cv::FILLED
-            );
+                cv::drawContours(
+                    darker_mask,
+
+                    // relatively shrink the circle to make the darker area more pure.
+
+                    contours, cid,
+                    cv::Scalar(255), cv::FILLED
+                );
+
+                cv::drawContours(
+                    lighter_mask,
+
+                    // relatively extends the circle, note that the two small red
+                    // triangle marks lies within lighter mask but with distinct
+                    // grayscale compared to the background. we may just use the 
+                    // median filter to ignore them.
+
+                    contours, cid,
+                    cv::Scalar(0), cv::FILLED
+                );
+            }
+
+            cid ++;
         }
-
+       
         scale_dark.push_back(quartile(sc, darker_mask, 0.40));
         scale_light.push_back(quartile(sc, lighter_mask, 0.60));
-        
-        if (circles.size() == 1) {
+
+        if (det) {
             scale_success.push_back(true);
-            scale_size.push_back(CV_PI * pow(circles[0][2], 2));
+            scale_size.push_back(cv::contourArea(contours[select_id], false));
         } else {
             scale_success.push_back(false);
             scale_size.push_back(1);
@@ -682,6 +724,12 @@ double process(char *file, bool show_msg)
     auto duration = chrono::duration_cast<chrono::milliseconds>(end - start);
     double ms = double(duration.count()) * chrono::milliseconds::period::num /
                 chrono::milliseconds::period::den;
+
+    for (auto fore : overlap) {
+        show(fore, "foreground", 800, 600);
+    }
+
+    show(annot, "annotated", 800, 600);
 
     return ms;
 }
@@ -1591,7 +1639,7 @@ void infect(cv::Mat &grayscale, cv::Mat &out, cv::Point init, double cutoff)
 void hist(cv::Mat &grayscale, cv::Mat mask) {
     
     const int channels[] = { 0 };
-	cv::Mat hist;
+	cv::Mat histo;
 	int dims = 1;
 	const int histSize[] = { 256 };
 
@@ -1599,7 +1647,7 @@ void hist(cv::Mat &grayscale, cv::Mat mask) {
 	const float* ranges[] = { pranges };
 	
 	cv::calcHist(
-        &grayscale, 1, channels, mask, hist, dims,
+        &grayscale, 1, channels, mask, histo, dims,
         histSize, ranges, true, false
     );
 
@@ -1608,12 +1656,12 @@ void hist(cv::Mat &grayscale, cv::Mat mask) {
 	cv::Mat hist_img = cv::Mat::zeros(hist_height, 256 * scale, CV_8UC3);
 	
     double max_val;
-	cv::minMaxLoc(hist, 0, &max_val, 0, 0);
+	cv::minMaxLoc(histo, 0, &max_val, 0, 0);
 
 	for (int i = 0; i < 256; i++)
 	{
-		float bin_val = hist.at<float>(i);
-		int intensity = cvRound(bin_val*hist_height / max_val);
+		float bin_val = histo.at<float>(i);
+		int intensity = cvRound(bin_val * hist_height / max_val);
 		cv::rectangle(
             hist_img, cv::Point(i * scale, hist_height - 1),
             cv::Point((i + 1) * scale - 1, hist_height - intensity),
@@ -1639,22 +1687,32 @@ int quartile(cv::Mat &grayscale, cv::Mat mask, double lower) {
         histSize, ranges, true, false
     );
     
-    float sum, accum;
+    float sum = 0, accum = 0;
     for (int i = 0; i < 256; i++) sum += histo.at<float>(i);
     for (int i = 0; i < 256; i++) {
         accum += histo.at<float>(i);
         if (accum > sum * lower) return i;
     }
 
-    hist(grayscale, mask);
     return 255;
 }
 
 int any(cv::Mat &binary) {
-    int count;
+    int count = 0;
     for (int r = 0; r < binary.rows; r ++) {
         auto ptr = binary.ptr(r);
         for(int c = 0; c < binary.cols; c ++) {
+            if (ptr[c] > 0) count += 1;
+        }
+    }
+    return count;
+}
+
+int any_right(cv::Mat &binary, int col) {
+    int count = 0;
+    for (int r = 0; r < binary.rows; r ++) {
+        auto ptr = binary.ptr(r);
+        for(int c = col; c < binary.cols; c ++) {
             if (ptr[c] > 0) count += 1;
         }
     }

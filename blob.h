@@ -52,6 +52,7 @@ void show(cv::Mat &matrix, const char* window, int width = 800, int height = 600
 void hist(cv::Mat &grayscale, cv::Mat mask);
 int quartile(cv::Mat &grayscale, cv::Mat mask, double lower);
 int any(cv::Mat &binary);
+int any_right(cv::Mat &binary, int col);
 
 inline double au(
     double foremean, int foresize,
