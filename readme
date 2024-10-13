@@ -1,0 +1,19 @@
+
+                                spblob
+                                ======
+
+1   introduction
+----------------
+
+    spblob is a software for quantification of stained semen patches on certain
+    test papers. 
+
+2   licensing
+-------------
+
+    part of the software (distrib.c, distrib.h and bratio.c) are from GNU R,
+    which is licensed under GPLv3, with minor adjustments. bratio.c from the
+    implementation of algorithm 708 collected by ACM. <https://www.r-project.org/>
+
+    copyright yang-z. <xornent@outlook.com> 2024.
+    this project is licensed under GPLv3. <https://www.gnu.org/licenses/gpl-3.0.html>
