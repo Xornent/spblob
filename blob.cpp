@@ -499,6 +499,7 @@ double process(char *file, bool show_msg)
             cv::cvtColor(roi, ol, cv::COLOR_GRAY2BGR);
 
             if (show_msg) printf("  [.] performing infection for %d ... \r", croi);
+            fflush(stdout);
             infect(usms.at(croi - 1), bgstrict, cv::Point(1, (roi.rows - 1) / 2 + 1), finethresh);
             infect(usms.at(croi - 1), bgloose, cv::Point(1, (roi.rows - 1) / 2 + 1), coarsethresh);
 
@@ -567,6 +568,7 @@ double process(char *file, bool show_msg)
             bgloose = cv::Mat::zeros(roi.size(), CV_8U);
 
             if (show_msg) printf("  [.] correcting infection for %d ... \r", croi);
+            fflush(stdout);
             infect(usms.at(croi - 1), bgloose, cv::Point(1, (roi.rows - 1) / 2 + 1), coarsethresh);
 
             // extract the foreground from the looser background, as an inner circle
