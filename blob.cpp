@@ -406,7 +406,14 @@ double process(char *file)
         if (width > 1)
         {
             if (corratio < 0.1) { pass1.push_back(true); }
-            else { pass1.push_back(false); continue; }
+            else { 
+                pass1.push_back(false);
+
+                // placeholder to ensure the length of vector
+                usms.push_back(cv::Mat(cv::Size(3, 3), CV_8U, cv::Scalar(0)));
+                rois.push_back(cv::Mat(cv::Size(3, 3), CV_8U, cv::Scalar(0)));
+                continue;
+            }
 
             int roih = int(width);
             int roiw = 250;
@@ -423,38 +430,15 @@ double process(char *file)
             // second correction. if the line that match our criteria is not
             // found, we will just skip this process.
 
-            std::vector<cv::Vec2f> lines;
-
             cv::Mat blurred;
             cv::GaussianBlur(roi, blurred, cv::Size(5, 5), 0);
 
-            cv::Mat canny_roi;
             cv::Mat blur_usm, usm;
             cv::GaussianBlur(blurred, blur_usm, cv::Size(0, 0), 25);
             cv::addWeighted(blurred, 1.5, blur_usm, -0.5, 0, usm);
-            cv::Canny(usm, canny_roi, 50, 100);
-
-            cv::HoughLines(canny_roi, lines, 1, CV_PI / 180., 50);
-
-            for (auto line : lines)
-            {
-
-                float rho = line[0], theta = line[1];
-                double sin_theta = sin(theta), cos_theta = cos(theta);
-                double x = rho * cos_theta, y = rho * sin_theta;
-
-                cv::Point pt1, pt2;
-                pt1.x = round(x + 1000 * (-sin_theta));
-                pt1.y = round(y + 1000 * (cos_theta));
-                pt2.x = round(x - 1000 * (-sin_theta));
-                pt2.y = round(y - 1000 * (cos_theta));
-
-                if (fabs(cos_theta) > 0.85)
-                {
-                    // cv::line(roi, pt1, pt2, cv::Scalar(0), 2);
-                }
-            }
-
+            
+            blur_usm.release();
+            usms.push_back(usm);
             rois.push_back(roi);
         }
     }
@@ -475,55 +459,64 @@ double process(char *file)
         }
 
         croi += 1;
-        cv::Mat bgstrict = cv::Mat::zeros(roi.size(), CV_8U);
-        cv::Mat bgloose = cv::Mat::zeros(roi.size(), CV_8U);
-        cv::Mat ol;
-
+        cv::Mat bgstrict, bgloose, fg, ol;
         cv::Mat red(roi.size(), CV_8UC3, cv::Scalar(0, 0, 255));
         cv::Mat green(roi.size(), CV_8UC3, cv::Scalar(0, 255, 0));
         cv::Mat blue(roi.size(), CV_8UC3, cv::Scalar(255, 0, 0));
 
-        cv::cvtColor(roi, ol, cv::COLOR_GRAY2BGR);
+        bool detected = false;
+        int maxiter = 4;
+        double finethresh = 0.0781;
+        double coarsethresh = 0.1875; 
 
-        printf("\n  performing infection for %d ... ", croi);
-        infect(roi, bgstrict, cv::Point(1, (roi.rows - 1) / 2 + 1), 0.05);
-        infect(roi, bgloose, cv::Point(1, (roi.rows - 1) / 2 + 1), 0.12);
+        while (!detected && maxiter > 0) {
 
-        // extract the foreground from the looser background, as an inner circle
+            maxiter -= 1;
+            finethresh *= 0.8;
+            coarsethresh *= 0.8;
+            bgstrict = cv::Mat::zeros(roi.size(), CV_8U);
+            bgloose = cv::Mat::zeros(roi.size(), CV_8U);
+            fg = cv::Mat::zeros(roi.size(), CV_8U);
 
-        cv::Mat kernel_full = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 3));
-        cv::Mat morph;
-        cv::Mat fg = cv::Mat::zeros(roi.size(), CV_8U);
+            cv::cvtColor(roi, ol, cv::COLOR_GRAY2BGR);
 
-        cv::morphologyEx(bgloose, morph, cv::MORPH_CLOSE, kernel_full, cv::Point(-1, -1), 1);
-        reverse(morph);
-        cv::morphologyEx(morph, morph, cv::MORPH_CLOSE, kernel_full, cv::Point(-1, -1), 2);
-        cv::morphologyEx(morph, morph, cv::MORPH_DILATE, kernel_full, cv::Point(-1, -1), 3);
+            printf("\n  performing infection for %d ... ", croi);
+            infect(usms.at(croi - 1), bgstrict, cv::Point(1, (roi.rows - 1) / 2 + 1), finethresh);
+            infect(usms.at(croi - 1), bgloose, cv::Point(1, (roi.rows - 1) / 2 + 1), coarsethresh);
 
-        // extract the central circle.
+            // extract the foreground from the looser background, as an inner circle
 
-        std::vector<std::vector<cv::Point>> contours;
-        cv::findContours(morph, contours, cv::RETR_TREE, cv::CHAIN_APPROX_SIMPLE);
+            cv::Mat kernel_full = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 3));
+            cv::Mat morph;
 
-        // match a roughly circular shape, with an estimated rational size.
+            cv::morphologyEx(bgloose, morph, cv::MORPH_CLOSE, kernel_full, cv::Point(-1, -1), 1);
+            reverse(morph);
+            cv::morphologyEx(morph, morph, cv::MORPH_CLOSE, kernel_full, cv::Point(-1, -1), 2);
 
-        int idc = 0;
-        for (auto cont : contours) {
-            double lenconts = cv::arcLength(cont, true);
-            double area = cv::contourArea(cont, false);
-            double ratio = lenconts * lenconts / area;
+            // extract the central circle.
 
-            printf("\n    [%d] area: %.4f, r: %.4f ", idc + 1, area, ratio / CV_PI);
+            std::vector<std::vector<cv::Point>> contours;
+            cv::findContours(morph, contours, cv::RETR_TREE, cv::CHAIN_APPROX_SIMPLE);
 
-            if (ratio > 3 * CV_PI && ratio < 6 * CV_PI &&
-                area > 3000 && area < 6000) {
-                cv::drawContours(ol, contours, idc, cv::Scalar(0, 0, 255), 2);
-                cv::drawContours(fg, contours, idc, cv::Scalar(255), cv::FILLED);
-            } else {
-                cv::drawContours(ol, contours, idc, cv::Scalar(0, 0, 0), 1);
+            // match a roughly circular shape, with an estimated rational size.
+
+            int idc = 0;
+            for (auto cont : contours) {
+                double lenconts = cv::arcLength(cont, true);
+                double area = cv::contourArea(cont, false);
+                double ratio = lenconts * lenconts / area;
+
+                if (ratio > 3 * CV_PI && ratio < 6 * CV_PI &&
+                    area > 3000 && area < 6000) {
+                    cv::drawContours(ol, contours, idc, cv::Scalar(0, 0, 255), 2);
+                    cv::drawContours(fg, contours, idc, cv::Scalar(255), cv::FILLED);
+                    detected = true;
+                } else {
+                    cv::drawContours(ol, contours, idc, cv::Scalar(0, 0, 0), 1);
+                }
+
+                idc ++;
             }
-
-            idc ++;
         }
 
         // draw the visualization map.
