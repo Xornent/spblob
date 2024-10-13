@@ -39,15 +39,19 @@ int amin(int n, double* arr);
 int boundary(cv::Mat &grayscale, cv::Point2d origin, cv::Point2d step, int maximal, double tolerance);
 uchar bilinear(uchar p1, uchar p2, uchar p3, uchar p4, double x, double y);
 uchar get_bilinear(cv::Mat &grayscale, double x, double y);
+void infect(cv::Mat& grayscale, cv::Mat& out, cv::Point init, double cutoff);
 
-cv::Mat extract_flank(
-    cv::Mat &grayscale, cv::Point2d origin,
+void extract_flank(
+    cv::Mat &grayscale, cv::Mat &out, cv::Point2d origin,
     cv::Point2d orient, cv::Point2d up,
     int flank, int extend
 );
 
 void plot(int n, double vec[], const char* title);
 void show(cv::Mat &matrix, const char* window, int width = 800, int height = 600);
+
+// do not directly use distrib.h.  it is the internal header for the statistics
+// library, the useful and clean export for libdistrib is written here.
 
 extern "C" {
 
