@@ -67,9 +67,6 @@ namespace chrono = std::chrono;
 
 #include "blob.h"
 
-static FILE* logfile = NULL;
-static int save_count = 1;
-
 int main(int argc, char *argv[])
 {
 
@@ -84,8 +81,6 @@ int main(int argc, char *argv[])
         printf("-d     toogle directory process mode\n");
         return 1;
     }
-
-    logfile = fopen("log.csv", "a+");
 
     if (strcmp(argv[1], "-d") == 0)
     {
@@ -108,8 +103,6 @@ int main(int argc, char *argv[])
         printf("< %.3f s\n", dur);
     }
 
-    fclose(logfile);
-
     return 0;
 }
 
@@ -127,7 +120,6 @@ double process(char *file, bool show_msg)
     cv::Mat component_red;
     grayscale.copyTo(component_red);
     color_significance(colored_hsv, component_red, 0.0);
-    show(component_red, "red");
 
     cv::Mat annot;
     colored.copyTo(annot);
@@ -277,7 +269,7 @@ double process(char *file, bool show_msg)
     {
         for (int j = i + 1; j < meeting_points.size(); j++)
         {
-            if (distance(meeting_points[i].second, meeting_points[j].second) < 60.0)
+            if (distance(meeting_points[i].second, meeting_points[j].second) < 40.0)
             { // FIXME. CHANGE
                 paired.push_back(std::pair<int, int>(
                     meeting_points[i].first, meeting_points[j].first));
@@ -366,8 +358,8 @@ double process(char *file, bool show_msg)
         // 68.28 (in filter_color) which indicated the zoomed image is set to
         // a uniform length of 20px of the scale bar.
 
-        cv::Point2d orig_b1((origin.x + unifx * 210.) / zoom, (origin.y + unify * 210.) / zoom); // FIXME: CHANGE
-        cv::Point2d orig_b2((origin.x + unifx * 240.) / zoom, (origin.y + unify * 240.) / zoom); // FIXME: CHANGE
+        cv::Point2d orig_b1((origin.x + unifx * 350.) / zoom, (origin.y + unify * 350.) / zoom); // FIXME: CHANGE
+        cv::Point2d orig_b2((origin.x + unifx * 380.) / zoom, (origin.y + unify * 380.) / zoom); // FIXME: CHANGE
         
         // for a short version 160 and 180.
 
@@ -425,7 +417,7 @@ double process(char *file, bool show_msg)
             }
 
             int roih = int(width);
-            int roiw = 350;
+            int roiw = 300;
 
             cv::Mat roi;
             extract_flank(
@@ -780,7 +772,7 @@ double process(char *file, bool show_msg)
     printf("  ---- ------- ------ ----- ---------- ---------- ------------ ------------ -------- --------- -------- ---------- \n");
 
     for (int i = 0; i < rois.size(); i++) {
-        printf("  [%2d] ", i + 1);
+        printf("  [%2d] ", i);
 
         if (pass1.at(i)) printf("      x ");
         else printf("      . ");
@@ -839,60 +831,7 @@ double process(char *file, bool show_msg)
         show(fore, "foreground", 800, 600);
     }
 
-    cv::namedWindow("annotated", cv::WINDOW_NORMAL);
-    cv::resizeWindow("annotated", 800, 600);
-    cv::imshow("annotated", annot);
-    cv::waitKey();
-    cv::destroyAllWindows();
-
-    for (int i = 0; i < rois.size(); i++) {
-        printf("  [%2d] input name: ", i + 1);
-        char name[100] = {0};
-        scanf("%s", name);
-
-        char strpass1[2] = ".";
-        if (pass1.at(i)) strpass1[0] = 'x';
-        else strpass1[0] = '.';
-
-        char strpass2[2] = ".";
-        if (scale_success.at(i)) strpass2[0] = 'x';
-        else strpass2[0] = 'x';
-
-        char strpass3[3] = ".";
-        if (has_foreground.at(i)) strpass3[0] = 'x';
-        else strpass3[0] = '.';
-
-        double fm = -1; int fsz = -1;
-        if (has_foreground.at(i)) {
-            cv::Mat kernel_full = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 3));
-            cv::Mat morph;
-
-            cv::morphologyEx(
-                foreground.at(i), morph,
-                cv::MORPH_DILATE, kernel_full,
-                cv::Point(-1, -1), 2
-            );
-
-            auto foremean = cv::mean(rois.at(i), morph);
-            auto masksum = any(morph);
-            fm = foremean[0]; fsz = masksum;
-        }
-
-        auto backsmean = cv::mean(rois.at(i), back_strict.at(i));
-        auto backlmean = cv::mean(rois.at(i), back_loose.at(i));
-
-        fprintf(
-            logfile, "%s,%d,%d,%s,%s,%s,%s,%f,%d,%f,%f,%d,%d,%f\n",
-            file, i + 1, save_count, name, strpass1, strpass2, strpass3,
-            fm, fsz, backsmean[0], backlmean[0],
-            scale_dark.at(i), scale_light.at(i), scale_size.at(i)
-        );
-
-        char savefname[100] = "";
-        sprintf(savefname, "dataset/%d.jpg", save_count);
-        cv::imwrite(savefname, rois.at(i));
-        save_count += 1;
-    }
+    show(annot, "annotated", 800, 600);
 
     return ms;
 }
@@ -975,7 +914,7 @@ void anchor(cv::Mat &image, anchors_t &anchors, double prepzoom)
 
 #elif defined(anchordet_threshold)
 
-    cv::threshold(usm, morph, 20, 255, cv::THRESH_BINARY);
+    cv::threshold(usm, morph, 60, 255, cv::THRESH_BINARY);
 
 #ifdef verbose
     show(morph, "threshold", 800, 600);
@@ -1001,11 +940,11 @@ void anchor(cv::Mat &image, anchors_t &anchors, double prepzoom)
             // here, we should apply simple color, shape and size threshold
             // for selecting valid red triangle as reference.
 
-            double area = cv::contourArea(contours[i], false);
-            double length = cv::arcLength(contours[i], true);
+            double area = cv::contourArea(vertices[i], false);
+            double length = cv::arcLength(vertices[i], true);
             double ratio = length * length / area;
-            
-            if (ratio < 15 || ratio > 25)
+
+            if (ratio < 22 || ratio > 25)
                 continue;
             if (area < 10)
                 continue;
@@ -1044,6 +983,7 @@ void anchor(cv::Mat &image, anchors_t &anchors, double prepzoom)
 
 void filter_mean_color(cv::Mat &colored, anchors_t &anchors)
 {
+
     cv::Mat smaller, hsv;
     double zoom = anchors.zoom;
     cv::resize(colored, smaller, cv::Size(0, 0), zoom, zoom);
@@ -1390,6 +1330,7 @@ std::vector<std::pair<uchar, int>> extract_line(
 
 void plot(int n, double vec[], const char *title)
 {
+
     cv::Mat data_x(1, n, CV_64F);
     cv::Mat data_y(1, n, CV_64F);
 
@@ -1416,6 +1357,7 @@ double distance(cv::Point2d p1, cv::Point2d p2)
 
 double levene(int n1, int n2, double *arr1, double *arr2)
 {
+
     double *deviance1 = (double *)malloc(sizeof(double) * n1);
     double *deviance2 = (double *)malloc(sizeof(double) * n2);
     double sum1 = 0, sum2 = 0;
@@ -1577,7 +1519,7 @@ int boundary(cv::Mat &grayscale, cv::Point2d origin, cv::Point2d step, int maxim
             continue;
 
         uchar c = grayscale.at<uchar>(posy, posx);
-        if (c < 80)
+        if (c < 100)
             return i;
     }
 
