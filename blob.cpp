@@ -72,7 +72,6 @@ static int save_count = 1;
 
 int main(int argc, char *argv[])
 {
-
     if (argc == 1)
     {
         printf("spblob: blob semen patches from images.\n");
