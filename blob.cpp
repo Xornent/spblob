@@ -4,6 +4,8 @@
 // enable color filtering: the anchor triangles will be filtered to retain
 //     those with perceptible red color.
 
+#define red_thresh (40)
+#define size_thresh (200)
 #define filter_color
 
 // anchor detection modes:
@@ -44,6 +46,7 @@
 //     with debug_w and debug_h.
 
 #undef debug
+#undef verbose
 
 #undef mode_splitimage
 #define debug_w 1050
@@ -51,6 +54,10 @@
 #define roisize 150
 
 #define mode_wholeimage
+
+// gendata: enable dataset generation mode.
+
+#define gendata
 
 // ============================================================================
 
@@ -67,8 +74,50 @@ namespace chrono = std::chrono;
 
 #include "blob.h"
 
-static FILE* logfile = NULL;
-static int save_count = 1;
+// ============================================================================
+
+// logging
+
+#ifdef gendata
+    static FILE* logfile = NULL;
+    static int save_count = 360;
+    #define logfpath "log.csv"
+    #define datapath "dataset/"
+#endif
+
+// ============================================================================
+
+// geometric constants
+
+// india and china-short constant set.
+
+// #define c_scale_factor (2)
+// #define c_pair_distance_threshold (30.0 * c_scale_factor)
+// #define c_scale_width (60.0 * c_scale_factor)
+// #define c_proximal (210.0)
+// #define c_distal (240.0)
+
+// china-long constant set.
+
+// #define c_scale_factor (2)
+// #define c_pair_distance_threshold (30.0 * c_scale_factor)
+// #define c_scale_width (60.0 * c_scale_factor)
+// #define c_proximal (310.0)
+// #define c_distal (340.0)
+
+// india-wide constant set.
+
+#define c_scale_factor (2.6)
+#define c_pair_distance_threshold (30.0 * c_scale_factor)
+#define c_scale_width (60.0 * c_scale_factor)
+#define c_proximal (270.0)
+#define c_distal (300.0)
+
+#ifdef debug
+#define verbose
+#endif
+
+// ============================================================================
 
 int main(int argc, char *argv[])
 {
@@ -84,7 +133,9 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    logfile = fopen("log.csv", "a+");
+#ifdef gendata
+    logfile = fopen(logfpath, "a+");
+#endif
 
     if (strcmp(argv[1], "-d") == 0)
     {
@@ -94,8 +145,11 @@ int main(int argc, char *argv[])
         {
             if (!entry.is_directory())
             {
-                printf("processing %s ... \n", (char *)(entry.path().filename().c_str()));
-                double dur = process((char *)(entry.path().c_str()), true);
+                // needed to add those .string() before .c_str(). without this works fine
+                // on linux, but not on msys-windows platforms.
+
+                printf("processing %s ... \n", (char *)(entry.path().filename().string().c_str()));
+                double dur = process((char *)(entry.path().string().c_str()), true);
                 printf("< %.3f s\n", dur);
             }
         }
@@ -107,14 +161,15 @@ int main(int argc, char *argv[])
         printf("< %.3f s\n", dur);
     }
 
+#ifdef gendata
     fclose(logfile);
+#endif
 
     return 0;
 }
 
 double process(char *file, bool show_msg)
 {
-
     // read the specified image in different color spaces.
 
     cv::Mat grayscale = cv::imread(file, cv::IMREAD_GRAYSCALE);
@@ -126,7 +181,10 @@ double process(char *file, bool show_msg)
     cv::Mat component_red;
     grayscale.copyTo(component_red);
     color_significance(colored_hsv, component_red, 0.0);
+
+#ifdef verbose
     show(component_red, "red");
+#endif
 
     cv::Mat annot;
     colored.copyTo(annot);
@@ -191,10 +249,6 @@ double process(char *file, bool show_msg)
 
 #elif defined(mode_wholeimage)
 
-#ifdef debug
-#define verbose
-#endif
-
     anchors_t anch;
     anchor(component_red, anch, zoom_first_round);
     filter_mean_color(colored, anch);
@@ -224,10 +278,13 @@ double process(char *file, bool show_msg)
     // here, we will scale the image to a relatively uniform size. and infer
     // the relative center for each detection.
 
-    cv::Mat scaled_gray, scaled_color;
-    cv::resize(grayscale, scaled_gray, cv::Size(0, 0), anch.zoom, anch.zoom);
-    cv::resize(colored, scaled_color, cv::Size(0, 0), anch.zoom, anch.zoom);
     double zoom = anch.zoom;
+    printf("zoom: %.4f \n", zoom);
+
+    if (isnan(zoom)) {
+        printf("  [e] nan error. \n");
+        return 0;
+    }
 
     std::vector<std::pair<int, cv::Point2d>> meeting_points;
     std::vector<std::pair<int, int>> paired;
@@ -276,7 +333,7 @@ double process(char *file, bool show_msg)
     {
         for (int j = i + 1; j < meeting_points.size(); j++)
         {
-            if (distance(meeting_points[i].second, meeting_points[j].second) < 60.0)
+            if (distance(meeting_points[i].second, meeting_points[j].second) < c_pair_distance_threshold)
             { // FIXME. CHANGE
                 paired.push_back(std::pair<int, int>(
                     meeting_points[i].first, meeting_points[j].first));
@@ -286,6 +343,50 @@ double process(char *file, bool show_msg)
             }
         }
     }
+
+    // correct the scale factor zoom
+
+    double avgmark = 0;
+    for (int i = 0; i < paired.size(); i++) {
+        cv::Point2d v1 = base_vertice[paired[i].first];
+        cv::Point2d v2 = base_vertice[paired[i].second];
+        avgmark += distance(v1, v2);
+    }
+
+    avgmark /= paired.size();
+    double original_zoom = zoom;
+    printf(
+        "corrected zoom: %.4f, %d, %.4f * %.4f \n", 
+        avgmark, paired.size(), zoom, ((34.14 * c_scale_factor) / avgmark)
+    );
+    zoom *= (c_scale_width / avgmark);
+
+    if (isnan(zoom)) {
+        printf("  [e] nan error. \n");
+        return 0;
+    }
+
+    cv::Mat scaled_gray, scaled_color;
+    cv::resize(grayscale, scaled_gray, cv::Size(0, 0), zoom, zoom);
+    cv::resize(colored, scaled_color, cv::Size(0, 0), zoom, zoom);
+
+    for(int i = 0; i < meeting_points.size(); i++)
+        meeting_points[i].second = cv::Point2d(
+            meeting_points[i].second.x * zoom / original_zoom,
+            meeting_points[i].second.y * zoom / original_zoom
+        );
+    
+    for(int i = 0; i < base_vertice.size(); i++)
+        base_vertice[i] = cv::Point2d(
+            base_vertice[i].x * zoom / original_zoom,
+            base_vertice[i].y * zoom / original_zoom
+        );
+    
+    for(int i = 0; i < base_meeting.size(); i++)
+        base_meeting[i] = cv::Point2d(
+            base_meeting[i].x * zoom / original_zoom,
+            base_meeting[i].y * zoom / original_zoom
+        );
 
     // calculate the grayscale on the uncorrected base line.
 
@@ -349,14 +450,15 @@ double process(char *file, bool show_msg)
         double upy = -unifx;
 
         cv::Mat scale_bar;
+
         extract_flank(
             scaled_gray, scale_bar, origin, cv::Point2d(unifx, unify),
-            cv::Point2d(upx, upy), (distance(vtop, vbottom) / 2 - 3), 125 // FIXME: CHANGE
+            cv::Point2d(upx, upy), (distance(vtop, vbottom) / 2 - 3), distance(vtop, vbottom) * 354 / 325.0
             // for a short version. 125.
         );
 
         scales.push_back(scale_bar);
-
+        
         // search for meeting boundary
 
         int maximal_search_length = int(100. / zoom);
@@ -365,8 +467,8 @@ double process(char *file, bool show_msg)
         // 68.28 (in filter_color) which indicated the zoomed image is set to
         // a uniform length of 20px of the scale bar.
 
-        cv::Point2d orig_b1((origin.x + unifx * 210.) / zoom, (origin.y + unify * 210.) / zoom); // FIXME: CHANGE
-        cv::Point2d orig_b2((origin.x + unifx * 240.) / zoom, (origin.y + unify * 240.) / zoom); // FIXME: CHANGE
+        cv::Point2d orig_b1((origin.x + unifx * c_proximal) / zoom, (origin.y + unify * c_proximal) / zoom); // FIXME: CHANGE
+        cv::Point2d orig_b2((origin.x + unifx * c_distal) / zoom, (origin.y + unify * c_distal) / zoom); // FIXME: CHANGE
         
         // for a short version 160 and 180.
 
@@ -544,7 +646,7 @@ double process(char *file, bool show_msg)
                 double area = cv::contourArea(cont, false);
                 double ratio = lenconts * lenconts / area;
 
-                if (area > 2000 && area < 50000) {
+                if (area > 1000 && area < 50000) {
 
                     fg = cv::Mat::zeros(roi.size(), CV_8U);
                     cv::drawContours(fg, contours, idc, cv::Scalar(255), cv::FILLED);
@@ -769,6 +871,8 @@ double process(char *file, bool show_msg)
     // std::vector< cv::Mat > foreground;    foreground mask
     // std::vector< bool > has_foreground;   has a foreground detection
 
+#ifdef verbose
+
     // note that `overlap` is not of the same length
 
     if (show_msg) printf("\n  [.] data begin \n\n");
@@ -829,14 +933,20 @@ double process(char *file, bool show_msg)
 
     if (show_msg) printf("\n  [.] data end \n");
 
+#else
+    printf("\n");
+#endif 
+
     auto end = chrono::system_clock::now();
     auto duration = chrono::duration_cast<chrono::milliseconds>(end - start);
     double ms = double(duration.count()) * chrono::milliseconds::period::num /
                 chrono::milliseconds::period::den;
 
+#ifdef verbose
     for (auto fore : overlap) {
         show(fore, "foreground", 800, 600);
     }
+#endif
 
     cv::namedWindow("annotated", cv::WINDOW_NORMAL);
     cv::resizeWindow("annotated", 800, 600);
@@ -844,10 +954,17 @@ double process(char *file, bool show_msg)
     cv::waitKey();
     cv::destroyAllWindows();
 
+#ifdef gendata
+
+    char lastname[100] = {0};
+
     for (int i = 0; i < rois.size(); i++) {
         printf("  [%2d] input name: ", i + 1);
         char name[100] = {0};
         scanf("%s", name);
+
+        if (strcmp(name, ".") == 0) strcpy(name, lastname);
+        else strcpy(lastname, name);
 
         char strpass1[2] = ".";
         if (pass1.at(i)) strpass1[0] = 'x';
@@ -887,11 +1004,15 @@ double process(char *file, bool show_msg)
             scale_dark.at(i), scale_light.at(i), scale_size.at(i)
         );
 
+        fflush(logfile);
+
         char savefname[100] = "";
-        sprintf(savefname, "dataset/%d.jpg", save_count);
+        sprintf(savefname, datapath "%d.jpg", save_count);
         cv::imwrite(savefname, rois.at(i));
         save_count += 1;
     }
+
+#endif
 
     return ms;
 }
@@ -974,7 +1095,7 @@ void anchor(cv::Mat &image, anchors_t &anchors, double prepzoom)
 
 #elif defined(anchordet_threshold)
 
-    cv::threshold(usm, morph, 20, 255, cv::THRESH_BINARY);
+    cv::threshold(usm, morph, red_thresh, 255, cv::THRESH_BINARY);
 
 #ifdef verbose
     show(morph, "threshold", 800, 600);
@@ -1067,6 +1188,7 @@ void filter_mean_color(cv::Mat &colored, anchors_t &anchors)
         cv::Mat contour_mask = cv::Mat::zeros(hsv.size(), CV_8UC1);
         cv::drawContours(contour_mask, contours, i, cv::Scalar(255), -1);
         cv::Scalar contour_mean = cv::mean(hsv, contour_mask);
+        double area = cv::contourArea(contours[i], false);
 
         double h = contour_mean[0];
         if (h < 90)
@@ -1075,10 +1197,10 @@ void filter_mean_color(cv::Mat &colored, anchors_t &anchors)
         double v = contour_mean[2];
 
 #ifdef filter_color
-        if ((h > 140 || h < 220) && s > 80 && v > 30)
+        if ((h > 140 || h < 220) && s > 80 && v > 30 && area >= size_thresh)
         {
-#else
-        if (true)
+#else  
+        if (area >= size_thresh)
         {
 #endif
             filter_indices.push_back(i);
@@ -1114,7 +1236,7 @@ void filter_mean_color(cv::Mat &colored, anchors_t &anchors)
 
     anchors.detections = filter_indices.size();
     anchors.vertices = array;
-    anchors.zoom = (68.28 / total_length) * zoom;
+    anchors.zoom = ((34.14 * c_scale_factor) / total_length) * zoom;
 
 #ifdef verbose
 
