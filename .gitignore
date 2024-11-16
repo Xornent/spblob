@@ -3,6 +3,7 @@
 test
 spblob*
 dataset
+annots
 
 *.o
 *.a

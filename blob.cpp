@@ -49,9 +49,10 @@
 #undef verbose
 
 #undef mode_splitimage
-#define debug_w 1050
-#define debug_h 825
-#define roisize 150
+
+// #define debug_w 1050
+// #define debug_h 825
+// #define roisize 150
 
 #define mode_wholeimage
 
@@ -63,8 +64,10 @@
 
 #include <iostream>
 #include <filesystem>
-namespace fs = std::filesystem;
 #include <chrono>
+#include <argp.h>
+
+namespace fs = std::filesystem;
 namespace chrono = std::chrono;
 
 #include <opencv2/opencv.hpp>
@@ -79,10 +82,12 @@ namespace chrono = std::chrono;
 // logging
 
 #ifdef gendata
+
     static FILE* logfile = NULL;
-    static int save_count = 360;
-    #define logfpath "log.csv"
-    #define datapath "dataset/"
+    static int save_count = 1;
+    static char logfpath[1024] = "log.csv";
+    static char datapath[1024] = "dataset";
+
 #endif
 
 // ============================================================================
@@ -107,11 +112,11 @@ namespace chrono = std::chrono;
 
 // india-wide constant set.
 
-#define c_scale_factor (2.6)
-#define c_pair_distance_threshold (30.0 * c_scale_factor)
-#define c_scale_width (60.0 * c_scale_factor)
-#define c_proximal (270.0)
-#define c_distal (300.0)
+static double c_scale_factor = (2.6);
+static double c_pair_distance_threshold = (30.0 * c_scale_factor);
+static double c_scale_width = (60.0 * c_scale_factor);
+static double c_proximal = (270.0);
+static double c_distal = (300.0);
 
 #ifdef debug
 #define verbose
@@ -119,27 +124,133 @@ namespace chrono = std::chrono;
 
 // ============================================================================
 
+// argument parser
+
+static char doc[] = 
+    "spblob [conventional]: detect intensity parameters from semen patches on test papers."
+    "this software does not rely on neural network model. but entirely by traditional"
+    "image segmentation with a watershed-like algorithm.";
+
+static char args_doc[] = 
+    "[--save-start N] [--log LOGFILE] [--scale SCALE] [--size SIZE] [--proximal PROX]"
+    "[--distal DIST] [-o OUTPUT] [-d] [-f] INPUT";
+
+static struct argp_option options[] = {
+    { "save-start", 'n', "N", 0, "starting index of the output dataset clips (0)"},
+    { "log", 'l', "LOGFILE", 0, "location of the output summary file (log.tsv)"},
+    { "scale", 'x', "SCALE", 0,
+      "the relative scale factor of the output dataset clips (the image dataset for later neural-network "
+      "based detection routine. this takes the perpendicular edge length of the positioning triangle "
+      "to be unified into fold changes from 10px. the default value requires that for each output image, "
+      "the positioning triangle should have an edge length of 26px. (2.6)" },
+    { "size", 's', "SIZE", 0, "resolution for the final image. stating that every 1 "
+      "unit in --scale should represent 60px in the dataset image. (60.0)"},
+    { "proximal", 'p', "PROX", 0, "proximal detetion position (270.0)" },
+    { "distal", 't', "DIST", 0, "distal detetion position (300.0)" },
+    { "output", 'o', "OUTPUT", 0, "dataset output directory. must exist prior to running"},
+    { "dir", 'd', 0, 0, "input be a directory of images in *.jpg"}, 
+    { "fas", 'f', 0, 0, "filename as sample, accept the file name of the image as the sample name "
+      "without prompting the user to enter the sample names manually"}, 
+    { 0 }
+};
+
+const char *argp_program_version = "spblob/c 1.0";
+const char *argp_program_bug_address = "yang-z. <xornent@outlook.com>";
+bool set_scale_width = false; // a flag if user defined scale widths manually.
+static error_t parse_opt(int key, char *arg, struct argp_state *state) {
+    
+    struct arguments *arguments = (struct arguments*) state -> input;
+
+    switch (key) {
+        case 'n':
+            arguments -> save_count = atoi(arg);
+            save_count = atoi(arg);
+            break;
+        case 'l': 
+            strcpy(arguments -> log_file_path, arg);
+            strcpy(logfpath, arg);
+            break;
+        case 'x':
+            arguments -> scale_factor = atof(arg);
+            c_scale_factor = arguments -> scale_factor;
+            break;
+        case 's':
+            arguments -> scale_width = atof(arg);
+            set_scale_width = true;
+            break;
+        case 'p':
+            arguments -> proximal = atof(arg);
+            c_proximal = atof(arg);
+            break;
+        case 't':
+            arguments -> distal = atof(arg);
+            c_distal = atof(arg);
+            break;
+        case 'o':
+            strcpy(arguments -> data_output_path, arg);
+            strcpy(datapath, arg);
+            break;
+        case 'd':
+            arguments -> directory = true;
+            break;
+        case 'f':
+            arguments -> fname_as_sample = true;
+            break;
+        case ARGP_KEY_ARG:
+            strcpy(arguments -> input, arg);
+            break;
+        case ARGP_KEY_END:
+            if (state -> arg_num != 1) argp_usage(state);
+            if (arguments -> input[0] == 0) argp_usage(state);
+            if (set_scale_width)
+                c_scale_width = arguments -> scale_width * c_scale_factor;
+            break;
+        default: return ARGP_ERR_UNKNOWN;
+    }
+
+    return 0;
+}
+
+static struct argp argp = { options, parse_opt, args_doc, doc };
+
 int main(int argc, char *argv[])
 {
-    if (argc == 1)
-    {
-        printf("spblob: blob semen patches from images.\n");
-        printf("usage: spblob [-d] [PATH]\n\n");
-        printf("positional arguments:\n");
-        printf("PATH   the path to the image file, or the directory containing\n");
-        printf("       image files when supplying -d option\n\n");
-        printf("options:\n");
-        printf("-d     toogle directory process mode\n");
+    struct arguments arguments;
+    arguments.save_count = save_count;
+    strcpy(arguments.log_file_path, logfpath);
+    strcpy(arguments.data_output_path, datapath);
+    arguments.scale_factor = c_scale_factor;
+    arguments.scale_width = c_scale_width;
+    arguments.proximal = c_proximal;
+    arguments.distal = c_distal;
+    arguments.directory = false;
+    arguments.fname_as_sample = false;
+    strcpy(arguments.input, "\0");
+
+    argp_parse(&argp, argc, argv, 0, 0, &arguments);
+
+#ifdef gendata
+
+    // open the log file and append.
+    logfile = fopen(logfpath, "a+");
+
+    // make sure the data path exist, and create subdirectories if they are not.
+    std::string opath(datapath);
+    if (fs::is_directory(opath)) {
+        if (!fs::is_directory(opath + "/sources")) fs::create_directories(opath + "/sources");
+        if (!fs::is_directory(opath + "/scales")) fs::create_directories(opath + "/scales");
+        if (!fs::is_directory(opath + "/annots")) fs::create_directories(opath + "/annots");
+        if (!fs::is_directory(opath + "/masks")) fs::create_directories(opath + "/masks");
+    } else {
+        printf("[e] data output path do not exist! \n");
         return 1;
     }
 
-#ifdef gendata
-    logfile = fopen(logfpath, "a+");
 #endif
 
-    if (strcmp(argv[1], "-d") == 0)
+    if (arguments.directory)
     {
-        char *dir = argv[2];
+        char *dir = arguments.input;
         std::string path(dir);
         for (const auto &entry : fs::directory_iterator(path))
         {
@@ -148,16 +259,21 @@ int main(int argc, char *argv[])
                 // needed to add those .string() before .c_str(). without this works fine
                 // on linux, but not on msys-windows platforms.
 
-                printf("processing %s ... \n", (char *)(entry.path().filename().string().c_str()));
-                double dur = process((char *)(entry.path().string().c_str()), true);
+                printf("processing %s ... \n", (char *)(entry.path().filename().c_str()));
+                char* pure_name = (char*) (entry.path().filename().replace_extension().c_str());
+                char* full_name = (char*) (entry.path().c_str());
+                double dur = process(full_name, pure_name, true, &arguments);
                 printf("< %.3f s\n", dur);
             }
         }
     }
     else
     {
-        printf("processing %s ... \n", argv[1]);
-        double dur = process(argv[1], true);
+        std::string path(arguments.input);
+        fs::path entry = path;
+        char* pure_name = (char*) entry.filename().replace_extension().c_str();
+        printf("processing %s ... \n", pure_name);
+        double dur = process(arguments.input, pure_name, true, &arguments);
         printf("< %.3f s\n", dur);
     }
 
@@ -168,7 +284,7 @@ int main(int argc, char *argv[])
     return 0;
 }
 
-double process(char *file, bool show_msg)
+double process(char *file, char* purefname, bool show_msg, struct arguments* args)
 {
     // read the specified image in different color spaces.
 
@@ -357,7 +473,7 @@ double process(char *file, bool show_msg)
     double original_zoom = zoom;
     printf(
         "corrected zoom: %.4f, %d, %.4f * %.4f \n", 
-        avgmark, paired.size(), zoom, ((34.14 * c_scale_factor) / avgmark)
+        avgmark, paired.size(), zoom, (c_scale_width / avgmark)
     );
     zoom *= (c_scale_width / avgmark);
 
@@ -394,6 +510,11 @@ double process(char *file, bool show_msg)
     std::vector<cv::Mat> scales;
     std::vector<cv::Mat> usms;
     std::vector<bool> pass1;
+
+    std::vector< cv::Vec2d > dorigins;
+    std::vector< cv::Vec2d > dorients;
+    std::vector< cv::Vec2d > dbases;
+    std::vector< int > dwidths;
 
     for (int i = 0; i < paired.size(); i++)
     {
@@ -515,6 +636,11 @@ double process(char *file, bool show_msg)
 
         if (width > 1)
         {
+            dorigins.push_back(cv::Point2d(origin.x / zoom, origin.y / zoom));
+            dbases.push_back(orig_b1);
+            dorients.push_back(cv::Point2d(corrorientx, corrorienty));
+            dwidths.push_back(int(width) * 2 + 1);
+
             if (corratio < 0.1) { pass1.push_back(true); }
             else { 
                 pass1.push_back(false);
@@ -868,7 +994,7 @@ double process(char *file, bool show_msg)
 
     // std::vector< cv::Mat > back_strict;   stricter background mask
     // std::vector< cv::Mat > back_loose;    looser background mask
-    // std::vector< cv::Mat > foreground;    foreground mask
+    // std::vector< cv::Mat > foreground;    annotated foreground mask
     // std::vector< bool > has_foreground;   has a foreground detection
 
 #ifdef verbose
@@ -948,20 +1074,25 @@ double process(char *file, bool show_msg)
     }
 #endif
 
-    cv::namedWindow("annotated", cv::WINDOW_NORMAL);
-    cv::resizeWindow("annotated", 800, 600);
-    cv::imshow("annotated", annot);
-    cv::waitKey();
-    cv::destroyAllWindows();
+    if (!args -> fname_as_sample) {
+        cv::namedWindow("annotated", cv::WINDOW_NORMAL);
+        cv::resizeWindow("annotated", 800, 600);
+        cv::imshow("annotated", annot);
+        cv::waitKey();
+        cv::destroyAllWindows();
+    }
 
 #ifdef gendata
 
-    char lastname[100] = {0};
+    char lastname[512] = {0};
 
     for (int i = 0; i < rois.size(); i++) {
-        printf("  [%2d] input name: ", i + 1);
-        char name[100] = {0};
-        scanf("%s", name);
+
+        char name[512] = {0};
+        if (!args -> fname_as_sample) {
+            printf("  [%2d] input name: ", i + 1);
+            scanf("%s", name);
+        } else strcpy(name, purefname);
 
         if (strcmp(name, ".") == 0) strcpy(name, lastname);
         else strcpy(lastname, name);
@@ -998,17 +1129,45 @@ double process(char *file, bool show_msg)
         auto backlmean = cv::mean(rois.at(i), back_loose.at(i));
 
         fprintf(
-            logfile, "%s,%d,%d,%s,%s,%s,%s,%f,%d,%f,%f,%d,%d,%f\n",
+            logfile, "%s\t%d\t%d\t%s\t%s\t%s\t%s\t%f\t%d\t%f\t%f\t%d\t%d\t%f\t%.1f\t%.1f\t%.1f\t%.1f\t%d\t%.4f\t%.4f\t%.4f\n",
             file, i + 1, save_count, name, strpass1, strpass2, strpass3,
             fm, fsz, backsmean[0], backlmean[0],
-            scale_dark.at(i), scale_light.at(i), scale_size.at(i)
+            scale_dark.at(i), scale_light.at(i), scale_size.at(i),
+            dorigins.at(i)[0], dorigins.at(i)[1],
+            dbases.at(i)[0], dbases.at(i)[1],
+            dwidths.at(i), zoom,
+            dorients.at(i)[0], dorients.at(i)[1]
         );
 
         fflush(logfile);
 
-        char savefname[100] = "";
-        sprintf(savefname, datapath "%d.jpg", save_count);
+        char savefname[1024] = "";
+        char fmtstring_src[1024] = "";
+        char fmtstring_scale[1024] = "";
+        char fmtstring_annot[1024] = "";
+        char fmtstring_mask[1024] = "";
+        strcpy(fmtstring_src, datapath);
+        strcpy(fmtstring_scale, datapath);
+        strcpy(fmtstring_annot, datapath);
+        strcpy(fmtstring_mask, datapath);
+
+        strcat(fmtstring_src, "/sources/%d.jpg");
+        strcat(fmtstring_scale, "/scales/%d.jpg");
+        strcat(fmtstring_annot, "/annots/%d.jpg");
+        strcat(fmtstring_mask, "/masks/%d.jpg");
+
+        sprintf(savefname, fmtstring_src, save_count);
         cv::imwrite(savefname, rois.at(i));
+
+        sprintf(savefname, fmtstring_scale, save_count);
+        cv::imwrite(savefname, scales.at(i));
+
+        sprintf(savefname, fmtstring_annot, save_count);
+        cv::imwrite(savefname, overlap.at(i));
+
+        sprintf(savefname, fmtstring_mask, save_count);
+        cv::imwrite(savefname, foreground.at(i));
+
         save_count += 1;
     }
 
