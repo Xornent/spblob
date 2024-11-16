@@ -4,6 +4,7 @@
 struct arguments {
     int save_count;
     char log_file_path[1024];
+    char stat_file_path[1024];
     char data_output_path[1024];
     double scale_factor;
     double pair_distance;

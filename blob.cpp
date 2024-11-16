@@ -65,7 +65,10 @@
 #include <iostream>
 #include <filesystem>
 #include <chrono>
+
+#ifdef unix
 #include <argp.h>
+#endif
 
 namespace fs = std::filesystem;
 namespace chrono = std::chrono;
@@ -84,9 +87,11 @@ namespace chrono = std::chrono;
 #ifdef gendata
 
     static FILE* logfile = NULL;
+    static FILE* statfile = NULL;
     static int save_count = 1;
-    static char logfpath[1024] = "log.csv";
-    static char datapath[1024] = "dataset";
+    static char logfpath[1024] = "raw.tsv";
+    static char statfpath[1024] = "stats.tsv";
+    static char datapath[1024] = ".";
 
 #endif
 
@@ -127,17 +132,19 @@ static double c_distal = (300.0);
 // argument parser
 
 static char doc[] = 
-    "spblob [conventional]: detect intensity parameters from semen patches on test papers."
-    "this software does not rely on neural network model. but entirely by traditional"
+    "spblob [conventional]: detect intensity parameters from semen patches on test papers. "
+    "this software does not rely on neural network model. but entirely by traditional "
     "image segmentation with a watershed-like algorithm.";
 
 static char args_doc[] = 
-    "[--save-start N] [--log LOGFILE] [--scale SCALE] [--size SIZE] [--proximal PROX]"
+    "[--save-start N] [--raw RAW] [--stat STAT] [--scale SCALE] [--size SIZE] [--proximal PROX] "
     "[--distal DIST] [-o OUTPUT] [-d] [-f] INPUT";
 
+#ifdef unix
 static struct argp_option options[] = {
     { "save-start", 'n', "N", 0, "starting index of the output dataset clips (0)"},
-    { "log", 'l', "LOGFILE", 0, "location of the output summary file (log.tsv)"},
+    { "raw", 'l', "RAW", 0, "location of the output raw data file (raw.tsv)"},
+    { "stat", 'a', "STAT", 0, "location of the statistics summary file (stats.tsv)"},
     { "scale", 'x', "SCALE", 0,
       "the relative scale factor of the output dataset clips (the image dataset for later neural-network "
       "based detection routine. this takes the perpendicular edge length of the positioning triangle "
@@ -169,6 +176,10 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
         case 'l': 
             strcpy(arguments -> log_file_path, arg);
             strcpy(logfpath, arg);
+            break;
+        case 'a':
+            strcpy(arguments -> stat_file_path, arg);
+            strcpy(statfpath, arg);
             break;
         case 'x':
             arguments -> scale_factor = atof(arg);
@@ -212,12 +223,14 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
 }
 
 static struct argp argp = { options, parse_opt, args_doc, doc };
+#endif
 
 int main(int argc, char *argv[])
 {
     struct arguments arguments;
     arguments.save_count = save_count;
     strcpy(arguments.log_file_path, logfpath);
+    strcpy(arguments.stat_file_path, statfpath);
     strcpy(arguments.data_output_path, datapath);
     arguments.scale_factor = c_scale_factor;
     arguments.scale_width = c_scale_width;
@@ -227,14 +240,54 @@ int main(int argc, char *argv[])
     arguments.fname_as_sample = false;
     strcpy(arguments.input, "\0");
 
+#ifdef unix
     argp_parse(&argp, argc, argv, 0, 0, &arguments);
+#else
+
+    if (argc != 12) {
+        printf(args_doc);
+        return 1;
+    }
+
+    arguments.save_count = atoi(argv[1]);
+    save_count = arguments.save_count;
+
+    strcpy(arguments.log_file_path, argv[2]);
+    strcpy(logfpath, argv[2]);
+
+    strcpy(arguments.stat_file_path, argv[3]);
+    strcpy(statfpath, argv[3]);
+
+    arguments.scale_factor = atof(argv[4]);
+    c_scale_factor = arguments.scale_factor;
+
+    arguments.scale_width = atof(argv[5]);
+    c_scale_width = arguments.scale_width * c_scale_factor;
+
+    arguments.proximal = atof(argv[6]);
+    c_proximal = arguments.proximal;
+
+    arguments.distal = atof(argv[7]);
+    c_distal = arguments.distal;
+    
+    strcpy(arguments.data_output_path, argv[8]);
+    strcpy(datapath, argv[8]);
+     
+    arguments.directory = strcmp(argv[9], "-d") == 0;
+    arguments.fname_as_sample = strcmp(argv[10], "-f") == 0;
+    strcpy(arguments.input, argv[11]);
+
+#endif
 
 #ifdef gendata
 
     // open the log file and append.
+
     logfile = fopen(logfpath, "a+");
+    statfile = fopen(statfpath, "a+");
 
     // make sure the data path exist, and create subdirectories if they are not.
+
     std::string opath(datapath);
     if (fs::is_directory(opath)) {
         if (!fs::is_directory(opath + "/sources")) fs::create_directories(opath + "/sources");
@@ -259,10 +312,22 @@ int main(int argc, char *argv[])
                 // needed to add those .string() before .c_str(). without this works fine
                 // on linux, but not on msys-windows platforms.
 
+#ifdef unix
                 printf("processing %s ... \n", (char *)(entry.path().filename().c_str()));
-                char* pure_name = (char*) (entry.path().filename().replace_extension().c_str());
-                char* full_name = (char*) (entry.path().c_str());
-                double dur = process(full_name, pure_name, true, &arguments);
+                double dur = process(
+                    (char*) (entry.path().c_str()),
+                    (char*) (entry.path().filename().replace_extension().c_str()),
+                    true, &arguments
+                );
+#else
+                printf("processing %s ... \n", (char *)(entry.path().filename().string().c_str()));
+                double dur = process(
+                    (char*) (entry.path().string().c_str()),
+                    (char*) (entry.path().filename().replace_extension().string().c_str()),
+                    true, &arguments
+                );
+#endif
+                
                 printf("< %.3f s\n", dur);
             }
         }
@@ -271,14 +336,31 @@ int main(int argc, char *argv[])
     {
         std::string path(arguments.input);
         fs::path entry = path;
-        char* pure_name = (char*) entry.filename().replace_extension().c_str();
-        printf("processing %s ... \n", pure_name);
-        double dur = process(arguments.input, pure_name, true, &arguments);
+
+#ifdef unix
+        printf("processing %s ... \n", (char*) entry.filename().replace_extension().c_str());
+        double dur = process(
+            arguments.input,
+            (char*) entry.filename().replace_extension().c_str(),
+            true, &arguments
+        );
+#else
+        printf("processing %s ... \n", (char*) entry.filename().replace_extension().string().c_str());
+        double dur = process(
+            arguments.input,
+            (char*) entry.filename().replace_extension().string().c_str(),
+            true, &arguments
+        );
+#endif
+
         printf("< %.3f s\n", dur);
     }
 
 #ifdef gendata
+
     fclose(logfile);
+    fclose(statfile);
+
 #endif
 
     return 0;
@@ -1129,7 +1211,7 @@ double process(char *file, char* purefname, bool show_msg, struct arguments* arg
         auto backlmean = cv::mean(rois.at(i), back_loose.at(i));
 
         fprintf(
-            logfile, "%s\t%d\t%d\t%s\t%s\t%s\t%s\t%f\t%d\t%f\t%f\t%d\t%d\t%f\t%.1f\t%.1f\t%.1f\t%.1f\t%d\t%.4f\t%.4f\t%.4f\n",
+            logfile, "%s\t%d\t%d\t%s\t%s\t%s\t%s\t%.2f\t%d\t%.2f\t%.2f\t%d\t%d\t%.2f\t%.1f\t%.1f\t%.1f\t%.1f\t%d\t%.4f\t%.4f\t%.4f\n",
             file, i + 1, save_count, name, strpass1, strpass2, strpass3,
             fm, fsz, backsmean[0], backlmean[0],
             scale_dark.at(i), scale_light.at(i), scale_size.at(i),
@@ -1138,6 +1220,32 @@ double process(char *file, char* purefname, bool show_msg, struct arguments* arg
             dwidths.at(i), zoom,
             dorients.at(i)[0], dorients.at(i)[1]
         );
+
+        // those with defected detection will not occur in stats.tsv. thus the
+        // number of rows may be smaller than the raw.tsv. and we should filter out
+        // any values that may crash the application when calculating log(0).
+
+        if (pass1.at(i) && scale_success.at(i) && has_foreground.at(i) &&
+            fsz > 0 && fm > 0 && (backsmean[0] - fm) > 0 && 
+            scale_light.at(i) > 0 && scale_dark.at(i) > 0 &&
+            scale_light.at(i) > scale_dark.at(i) &&
+            backlmean[0] > 0 && backsmean[0] > 0) {
+
+            fprintf(
+                statfile, "%s\t%d\t%d\t%.5f\t%.5f\t%.5f\t%.5f\t%.5f\t%.5f\t%.5f\t%.5f\t%s\n",
+                file, i + 1,
+                save_count,                                  // uid
+                log((backsmean[0] - fm) * fsz),              // log.abs
+                log(scale_light.at(i) - scale_dark.at(i)),   // log.delta
+                log(scale_light.at(i)),                      // log.light
+                log(scale_dark.at(i)),                       // log.dark
+                log(backlmean[0]),                           // log.back
+                log(backsmean[0]),                           // log.back.strict
+                log(fm),                                     // log.mean
+                log(fsz),                                    // log.sz
+                name                                         // sample
+            );
+        }
 
         fflush(logfile);
 
