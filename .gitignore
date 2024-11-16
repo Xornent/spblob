@@ -9,3 +9,5 @@ annots
 *.a
 
 .Rprofile
+
+out

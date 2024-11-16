@@ -1248,7 +1248,8 @@ double process(char *file, char* purefname, bool show_msg, struct arguments* arg
         }
 
         fflush(logfile);
-
+        fflush(statfile);
+        
         char savefname[1024] = "";
         char fmtstring_src[1024] = "";
         char fmtstring_scale[1024] = "";
