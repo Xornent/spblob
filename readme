@@ -6,9 +6,51 @@
 ----------------
 
     spblob is a software for quantification of stained semen patches on certain
-    test papers. 
+    test papers.
 
-2   licensing
+
+2   usage
+---------
+
+    usage: spblob [option...]
+                [--save-start N] [--raw RAW] [--stat STAT] [--scale SCALE] [--size
+                SIZE] [--proximal PROX] [--distal DIST] [-o OUTPUT] [-d] [-f] INPUT
+
+    spblob [conventional]: detect intensity parameters from semen patches on test
+    papers. this software does not rely on neural network model. but entirely by
+    traditional image segmentation with a watershed-like algorithm.
+    
+      -a, --stat=stat            location of the statistics summary file (stats.tsv)
+      -d, --dir                  input be a directory of images in *.jpg
+      -f, --fas                  filename as sample, accept the file name of the
+                                 image as the sample name without prompting the
+                                 user to enter the sample names manually
+      -l, --raw=RAW              location of the output raw data file (raw.tsv)
+      -n, --save-start=N         starting index of the output dataset clips (0)
+      -o, --output=OUTPUT        dataset output directory. must exist prior to
+                                 running
+      -p, --proximal=PROX        proximal detetion position (270.0)
+      -s, --size=SIZE            resolution for the final image. stating that every
+                                 1 unit in --scale should represent 60px in the
+                                 dataset image. (60.0)
+      -t, --distal=DIST          distal detetion position (300.0)
+      -x, --scale=SCALE          the relative scale factor of the output dataset
+                                 clips (the image dataset for later neural-network
+                                 based detection routine. this takes the
+                                 perpendicular edge length of the positioning
+                                 triangle to be unified into fold changes from
+                                 10px. the default value requires that for each
+                                 output image, the positioning triangle should have
+                                 an edge length of 26px.) (2.6)
+      -?, --help                 give this help list
+          --usage                give a short usage message
+      -v, --version              print program version
+    
+    mandatory or optional arguments to long options are also mandatory or optional
+    for any corresponding short options.
+
+
+3   licensing
 -------------
 
     part of the software (distrib.c, distrib.h and bratio.c) are from GNU R,
