@@ -69,12 +69,6 @@ int quartile(cv::Mat &grayscale, cv::Mat mask, double lower);
 int any(cv::Mat &binary);
 int any_right(cv::Mat &binary, int col);
 
-inline double au(
-    double foremean, int foresize,
-    double backstct, double backlse,
-    int dark, int light, double refsize
-);
-
 // do not directly use distrib.h.  it is the internal header for the statistics
 // library, the useful and clean export for libdistrib is written here.
 

@@ -1079,71 +1079,7 @@ double process(char *file, char* purefname, bool show_msg, struct arguments* arg
     // std::vector< cv::Mat > foreground;    annotated foreground mask
     // std::vector< bool > has_foreground;   has a foreground detection
 
-#ifdef verbose
-
-    // note that `overlap` is not of the same length
-
-    if (show_msg) printf("\n  [.] data begin \n\n");
-
-    // table header
-
-    printf("  [..]  orient  scale  fore  fore.mean  fore.size  back.s.mean  back.l.mean  sc.dark  sc.light  sc.size       [au] \n");
-    printf("  ---- ------- ------ ----- ---------- ---------- ------------ ------------ -------- --------- -------- ---------- \n");
-
-    for (int i = 0; i < rois.size(); i++) {
-        printf("  [%2d] ", i + 1);
-
-        if (pass1.at(i)) printf("      x ");
-        else printf("      . ");
-
-        if (scale_success.at(i)) printf("     x ");
-        else printf("     . ");
-
-        if (has_foreground.at(i)) printf("    x ");
-        else printf("    . ");
-
-        double fm; int fsz;
-        if (has_foreground.at(i)) {
-            cv::Mat kernel_full = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 3));
-            cv::Mat morph;
-
-            cv::morphologyEx(
-                foreground.at(i), morph,
-                cv::MORPH_DILATE, kernel_full,
-                cv::Point(-1, -1), 2
-            );
-
-            auto foremean = cv::mean(rois.at(i), morph);
-            auto masksum = any(morph);
-            fm = foremean[0]; fsz = masksum;
-            printf("    %6.2f %10d ", foremean[0], masksum);
-        } else printf("         .          . ");
-
-        auto backsmean = cv::mean(rois.at(i), back_strict.at(i));
-        auto backlmean = cv::mean(rois.at(i), back_loose.at(i));
-        printf("      %6.2f       %6.2f ", backsmean[0], backlmean[0]);
-
-        printf("%8d %9d ", scale_dark.at(i), scale_light.at(i));
-        if (scale_success.at(i)) {
-            printf("%8.1f ", scale_size.at(i));
-        } else printf("       . ");
-
-        if (pass1.at(i) && scale_success.at(i) && has_foreground.at(i)) {
-            printf("%10.2f ", au(
-                fm, fsz,
-                backsmean[0], backlmean[0],
-                scale_dark.at(i), scale_light.at(i), scale_size.at(i))
-            );
-        } else printf("         . ");
-
-        printf("\n");
-    }
-
-    if (show_msg) printf("\n  [.] data end \n");
-
-#else
     printf("\n");
-#endif 
 
     auto end = chrono::system_clock::now();
     auto duration = chrono::duration_cast<chrono::milliseconds>(end - start);
@@ -2274,12 +2210,4 @@ int any_right(cv::Mat &binary, int col) {
         }
     }
     return count;
-}
-
-inline double au(
-    double foremean, int foresize,
-    double backstct, double backlse,
-    int dark, int light, double refsize
-) {
-    return ((backstct - foremean) * foresize) / (light - dark);
 }
