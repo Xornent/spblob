@@ -2,8 +2,8 @@
 cpp = g++
 cc  = gcc
 
-debug = -g -O0 -fno-inline
-# debug = -O2
+# debug = -g -O0 -fno-inline
+debug = -O2
 
 lib = $(shell pkg-config --libs opencv4)
 inc = $(shell pkg-config --cflags opencv4)

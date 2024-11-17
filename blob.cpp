@@ -1499,6 +1499,12 @@ double mean(int n, double *arr)
 int boundary(cv::Mat &grayscale, cv::Point2d origin, cv::Point2d step, int maximal, double tolerance)
 {
     double o = grayscale.at<uchar>(int(origin.y), int(origin.x)) * 1.0;
+    std::vector<double> may_be_foregrounds;
+
+    // not confirming the foreground immediately, wait a few px.
+    // since the decrease along the border may be smoothed.
+
+    int delay = 10; 
 
     for (float i = 0; i <= maximal; ++i)
     {
@@ -1515,8 +1521,26 @@ int boundary(cv::Mat &grayscale, cv::Point2d origin, cv::Point2d step, int maxim
             continue;
 
         uchar c = grayscale.at<uchar>(posy, posx);
-        if (c < 80)
-            return i;
+
+        // here, applying a static number as the boundary threshold is not good enough
+        // and may be unfit to the brightless changes. however, those statistical methods
+        // seems to be too sensitive. may just try setting a sharp decrease detection
+        // with proportions.
+
+        // just ask the test paper manufacturers to address a black border to the 
+        // background just outside the test paper may work :)
+
+        // if (c < 80) return i;
+
+        if (i < delay) may_be_foregrounds.push_back(c * 1.0);
+        else {
+            int delayposy = int(origin.y) + int(round((i - delay) * step.y));
+            int delayposx = int(origin.x) + int(round((i - delay) * step.x));
+            uchar cd = grayscale.at<uchar>(delayposy, delayposx);
+            double mean_fore = mean(may_be_foregrounds.size(), may_be_foregrounds.data());
+            if (c < 0.70 * mean_fore) return i;
+            else may_be_foregrounds.push_back(cd * 1.0);
+        }
     }
 
     return maximal;
