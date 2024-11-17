@@ -12,40 +12,40 @@
 2   usage
 ---------
 
-    usage: spblob [option...]
-                [--save-start N] [--raw RAW] [--stat STAT] [--scale SCALE] [--size
-                SIZE] [--proximal PROX] [--distal DIST] [-o OUTPUT] [-d] [-f] INPUT
-
+    usage: spblob [--save-start N] [--raw RAW] [--stat STAT]
+                  [--scale SCALE] [--size SIZE] [--proximal PROX] [--distal DIST]
+                  [--posang-size PSIZE] [--posang-thresh PTHRESH]
+                  [-o OUTPUT] [-d] [-f] INPUT
+    
     spblob [conventional]: detect intensity parameters from semen patches on test
     papers. this software does not rely on neural network model. but entirely by
     traditional image segmentation with a watershed-like algorithm.
-    
-      -a, --stat=stat            location of the statistics summary file (stats.tsv)
-      -d, --dir                  input be a directory of images in *.jpg
-      -f, --fas                  filename as sample, accept the file name of the
-                                 image as the sample name without prompting the
-                                 user to enter the sample names manually
-      -l, --raw=RAW              location of the output raw data file (raw.tsv)
-      -n, --save-start=N         starting index of the output dataset clips (0)
-      -o, --output=OUTPUT        dataset output directory. must exist prior to
-                                 running
-      -p, --proximal=PROX        proximal detetion position (270.0)
-      -s, --size=SIZE            resolution for the final image. stating that every
-                                 1 unit in --scale should represent 60px in the
-                                 dataset image. (60.0)
-      -t, --distal=DIST          distal detetion position (300.0)
-      -x, --scale=SCALE          the relative scale factor of the output dataset
-                                 clips (the image dataset for later neural-network
-                                 based detection routine. this takes the
-                                 perpendicular edge length of the positioning
-                                 triangle to be unified into fold changes from
-                                 10px. the default value requires that for each
-                                 output image, the positioning triangle should have
-                                 an edge length of 26px.) (2.6)
-      -?, --help                 give this help list
-          --usage                give a short usage message
-      -v, --version              print program version
-    
+
+      -a, --stat            location of the statistics summary file. (stats.tsv)
+      -d, --dir             input be a directory of images in *.jpg.
+      -f, --fas             filename as sample, accept the file name of the image as
+                            the sample name without prompting the user to enter the
+                            sample names manually.
+      -l, --raw             location of the output raw data file. (raw.tsv)
+      -n, --save-start      starting index of the output dataset clips. (0)
+      -o, --output          dataset output directory. must exist prior to running
+      -p, --proximal        proximal detetion position. (270.0)
+      -s, --size            resolution for the final image. stating that every 1 unit
+                            in --scale should represent 60px in the dataset image. (60.0)
+      -t, --distal          distal detetion position. (300.0)
+      -x, --scale           the relative scale factor of the output dataset clips 
+                            (the image dataset for later neural-network based detection
+                            routine. this takes the perpendicular edge length of
+                            the positioning triangle to be unified into fold changes
+                            from 10px. the default value requires that for each output
+                            image, the positioning triangle should have an edge length
+                            of 26px. (2.6)
+      -y, --posang-size     the minimal size of the positioning angle. (50)
+      -z, --posang-thresh   the red visual intensity threshold for the positioning angle. (40)
+      -?, --help            give this help list.
+          --usage           give a short usage message.
+      -V, --version         print program version.
+
     mandatory or optional arguments to long options are also mandatory or optional
     for any corresponding short options.
 
@@ -57,5 +57,20 @@
     which is licensed under GPLv3, with minor adjustments. bratio.c from the
     implementation of algorithm 708 collected by ACM. <https://www.r-project.org/>
 
+    This program is free software: you can redistribute it and/or modify it under
+    the terms of the GNU General Public License as published by the Free Software
+    Foundation, either version 3 of the License, or (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful, but WITHOUT
+    ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+    FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License along with
+    this program.  If not, see <https://www.gnu.org/licenses/>.
+
     copyright yang-z. <xornent@outlook.com> 2024.
-    this project is licensed under GPLv3. <https://www.gnu.org/licenses/gpl-3.0.html>
+    report bugs to yang-z. <xornent@outlook.com>.
+
+
+last update: nov. 17, 2024.
+yang-z.

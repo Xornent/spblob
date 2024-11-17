@@ -106,9 +106,9 @@ static char doc[] =
     "image segmentation with a watershed-like algorithm.";
 
 static char args_doc[] = 
-    "[--save-start N] [--raw RAW] [--stat STAT] \n"
-    "[--scale SCALE] [--size SIZE] [--proximal PROX] [--distal DIST] \n"
-    "[--posang-size PSIZE] [--posang-thresh PTHRESH] \n"
+    "[--save-start N] [--raw RAW] [--stat STAT] "
+    "[--scale SCALE] [--size SIZE] [--proximal PROX] [--distal DIST] "
+    "[--posang-size PSIZE] [--posang-thresh PTHRESH] "
     "[-o OUTPUT] [-d] [-f] INPUT";
 
 #ifdef unix
