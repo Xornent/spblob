@@ -10,17 +10,8 @@ inc = $(shell pkg-config --cflags opencv4)
 
 all: spblob
 
-spblob: blob.cpp blob.h libdistrib.a
-	$(cpp) blob.cpp blob.h libdistrib.a $(inc) $(lib) -o spblob -Dunix $(debug)
+spblob: blob.cpp blob.h
+	$(cpp) blob.cpp blob.h $(inc) $(lib) -o spblob -Dunix $(debug)
 
 spblob-win: blob.cpp blob.h libdistrib.a
-	$(cpp) blob.cpp blob.h libdistrib.a $(inc) $(lib) -o spblob $(debug)
-
-bratio.o: bratio.c distrib.h 
-	$(cc) bratio.c -lm -c -o bratio.o -fcompare-debug-second -w $(debug)
-
-distrib.o: distrib.c bratio.c distrib.h
-	$(cc) distrib.c -lm -c -o distrib.o -fcompare-debug-second -w $(debug)
-
-libdistrib.a: bratio.o distrib.o
-	ar -rc libdistrib.a bratio.o distrib.o
+	$(cpp) blob.cpp blob.h $(inc) $(lib) -o spblob $(debug)

@@ -10,13 +10,6 @@
 
 // anchor detection modes:
 //
-// extendmorph: find the edges of the grayscale (or color channel) images,
-//     trying to connect slightly incontinuous segments, and widen the contour
-//     outline by a single dilation morphology operation.
-//
-// lineseg: simplify the canny edges with a predictive line segments, and draw
-//     these segments with a greater length to a new bitmap as the edges.
-//
 // threshold: direct thresholding (static). while a normalization step is
 //     required to tolerate more variable images, current tests suggests that
 //     this static threshold is enough for now. if you use raw grayscale, the
@@ -25,18 +18,9 @@
 //     the red parts is extensively highlighted and the threshold make sense,
 //     and this color transform overperform all attempts before.
 
-#undef anchordet_extendmorph
-#undef anchordet_lineseg
 #define anchordet_threshold
 
 // operation mode:
-//
-// splitimage: split the image into several roisize * roisize blocks. and
-//     process each block seperately before mapping the results to the original
-//     image. (a batch work, and may use parallel.). it is not recommended now,
-//     this takes more time than processing as a whole even it's parallel, and
-//     serves only to gain greater performance (with less distraction information)
-//     when using extendmorph detection algorithm.
 //
 // wholeimage: process as a whole.
 //
@@ -47,18 +31,7 @@
 
 #undef debug
 #undef verbose
-
-#undef mode_splitimage
-
-// #define debug_w 1050
-// #define debug_h 825
-// #define roisize 150
-
 #define mode_wholeimage
-
-// gendata: enable dataset generation mode.
-
-#define gendata
 
 // ============================================================================
 
@@ -84,16 +57,12 @@ namespace chrono = std::chrono;
 
 // logging
 
-#ifdef gendata
-
-    static FILE* logfile = NULL;
-    static FILE* statfile = NULL;
-    static int save_count = 1;
-    static char logfpath[1024] = "raw.tsv";
-    static char statfpath[1024] = "stats.tsv";
-    static char datapath[1024] = ".";
-
-#endif
+static FILE* logfile = NULL;
+static FILE* statfile = NULL;
+static int save_count = 1;
+static char logfpath[1024] = "raw.tsv";
+static char statfpath[1024] = "stats.tsv";
+static char datapath[1024] = ".";
 
 // ============================================================================
 
@@ -279,8 +248,6 @@ int main(int argc, char *argv[])
 
 #endif
 
-#ifdef gendata
-
     // open the log file and append.
 
     logfile = fopen(logfpath, "a+");
@@ -298,8 +265,6 @@ int main(int argc, char *argv[])
         printf("[e] data output path do not exist! \n");
         return 1;
     }
-
-#endif
 
     if (arguments.directory)
     {
@@ -356,12 +321,8 @@ int main(int argc, char *argv[])
         printf("< %.3f s\n", dur);
     }
 
-#ifdef gendata
-
     fclose(logfile);
     fclose(statfile);
-
-#endif
 
     return 0;
 }
@@ -391,62 +352,6 @@ double process(char *file, char* purefname, bool show_msg, struct arguments* arg
 
     auto start = chrono::system_clock::now();
 
-#if defined(mode_splitimage)
-
-    int totalh = 2 * (grayscale.size().height - roisize) / roisize;
-    int totalw = 2 * (grayscale.size().width - roisize) / roisize;
-
-#ifdef debug
-#define verbose
-
-    cv::Rect roi(debug_w, debug_h, roisize, roisize);
-    cv::Mat grayscale_roi(component_red, roi);
-    cv::Mat colored_roi(colored, roi);
-    anchors_t anch;
-    anchor(grayscale_roi, anch, zoom_first_round);
-    filter_mean_color(colored_roi, anch);
-
-#else
-
-    for (int h = 0; h < grayscale.size().height - roisize; h += roisize / 2)
-    {
-        for (int w = 0; w < grayscale.size().width - roisize; w += roisize / 2)
-        {
-
-            printf("  [.] processing (%d, %d) out of (%d, %d)\n", h, w, totalh, totalw);
-            cv::Rect roi(w, h, roisize, roisize);
-            cv::Mat grayscale_roi(component_red, roi);
-            cv::Mat colored_roi(colored, roi);
-            anchors_t anch;
-            anchor(grayscale_roi, anch, zoom_first_round);
-            filter_mean_color(colored_roi, anch);
-
-            if (anch.detections > 0)
-            {
-                std::vector<std::vector<cv::Point>> contours;
-                for (int i = 0; i < anch.detections; i++)
-                {
-                    cv::Point p1(anch.vertices[6 * i + 0] + w, anch.vertices[6 * i + 1] + h);
-                    cv::Point p2(anch.vertices[6 * i + 2] + w, anch.vertices[6 * i + 3] + h);
-                    cv::Point p3(anch.vertices[6 * i + 4] + w, anch.vertices[6 * i + 5] + h);
-                    std::vector<cv::Point> cont;
-                    cont.push_back(p1);
-                    cont.push_back(p2);
-                    cont.push_back(p3);
-                    contours.push_back(cont);
-                }
-
-                cv::drawContours(
-                    annot, contours, -1,
-                    cv::Scalar(255, 0, 0, 0), 2, 8);
-            }
-        }
-    }
-
-#endif
-
-#elif defined(mode_wholeimage)
-
     anchors_t anch;
     anchor(component_red, anch, zoom_first_round);
     filter_mean_color(colored, anch);
@@ -470,8 +375,6 @@ double process(char *file, char* purefname, bool show_msg, struct arguments* arg
             annot, contours, -1,
             cv::Scalar(255, 0, 0, 0), 2, 8);
     }
-
-#endif
 
     // here, we will scale the image to a relatively uniform size. and infer
     // the relative center for each detection.
@@ -1100,7 +1003,7 @@ double process(char *file, char* purefname, bool show_msg, struct arguments* arg
         cv::destroyAllWindows();
     }
 
-#ifdef gendata
+    // logging generatrion. 
 
     char lastname[512] = {0};
 
@@ -1216,8 +1119,6 @@ double process(char *file, char* purefname, bool show_msg, struct arguments* arg
         save_count += 1;
     }
 
-#endif
-
     return ms;
 }
 
@@ -1234,78 +1135,8 @@ void anchor(cv::Mat &image, anchors_t &anchors, double prepzoom)
     cv::GaussianBlur(blurred, blur_usm, cv::Size(0, 0), 25);
     cv::addWeighted(blurred, 1.5, blur_usm, -0.5, 0, usm);
 
-#ifdef verbose
-    show(usm, "sharpened", 800, 600);
-#endif
-
-    cv::Mat edges;
-    cv::Canny(usm, edges, 35, 55);
-    cv::Mat morph = cv::Mat::zeros(edges.size(), CV_8UC1);
-    for (int j = 0; j < 3; j++)
-        elongate_forward_oblique(edges);
-    for (int j = 0; j < 3; j++)
-        elongate_backward_oblique(edges);
-
-#ifdef verbose
-    show(edges, "edges", 800, 600);
-#endif
-
-#if defined(anchordet_extendmorph)
-
-    meet_horizontal(edges);
-    meet_vertical(edges);
-
-    cv::Mat kernel_full = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 3));
-    cv::morphologyEx(edges, morph, cv::MORPH_DILATE, kernel_full, cv::Point(-1, -1), 1);
-    meet_horizontal(morph);
-    meet_vertical(morph);
-    reverse(morph);
-
-#ifdef verbose
-    show(morph, "dilated", 800, 600);
-#endif
-
-#elif defined(anchordet_lineseg)
-
-    cv::Ptr<cv::LineSegmentDetector> detector = cv::createLineSegmentDetector();
-    std::vector<cv::Vec4f> segments;
-    detector->detect(edges, segments);
-
-    for (const auto &line : segments)
-    {
-        cv::Point2f p1(line[0], line[1]);
-        cv::Point2f p2(line[2], line[3]);
-        double length = sqrt(pow(p1.x - p2.x, 2) + pow(p1.y - p2.y, 2));
-
-        // elongate the line by 20% to fill the gaps.
-
-        float deltax = p2.x - p1.x;
-        float deltay = p2.y - p1.y;
-        float elongation_ratio = 0.2f;
-        p1.x = p1.x - elongation_ratio * deltax;
-        p1.y = p1.y - elongation_ratio * deltay;
-        p2.x = p2.x + elongation_ratio * deltax;
-        p2.y = p2.y + elongation_ratio * deltay;
-
-        if (length > 10)
-        {
-            cv::line(morph, p1, p2, cv::Scalar(255), 2);
-        }
-    }
-
-#ifdef verbose
-    show(morph, "lines", 800, 600);
-#endif
-
-#elif defined(anchordet_threshold)
-
+    cv::Mat morph = cv::Mat::zeros(usm.size(), CV_8UC1);
     cv::threshold(usm, morph, red_thresh, 255, cv::THRESH_BINARY);
-
-#ifdef verbose
-    show(morph, "threshold", 800, 600);
-#endif
-
-#endif
 
     std::vector<std::vector<cv::Point>> contours;
     cv::findContours(morph, contours, cv::RETR_TREE, cv::CHAIN_APPROX_SIMPLE);
@@ -1321,7 +1152,6 @@ void anchor(cv::Mat &image, anchors_t &anchors, double prepzoom)
         std::size_t lvert = vertices[i].size();
         if (lvert == 3)
         {
-
             // here, we should apply simple color, shape and size threshold
             // for selecting valid red triangle as reference.
 
@@ -1337,11 +1167,9 @@ void anchor(cv::Mat &image, anchors_t &anchors, double prepzoom)
             filter_indices.push_back(i);
 
 #ifdef verbose
-
             cv::drawContours(
                 smaller, contours, i,
                 cv::Scalar(255, 0, 0, 0), 2, 8);
-
 #endif
         }
     }
@@ -1448,162 +1276,6 @@ void filter_mean_color(cv::Mat &colored, anchors_t &anchors)
     printf("designated zoom: %4f\n", anchors.zoom);
 
 #endif
-}
-
-// for one dimension image (grayscale or binary) only.
-void elongate_forward_oblique(cv::Mat &binary)
-{
-
-    cv::Mat origin;
-    binary.copyTo(origin);
-    int width = binary.size().width;
-    int height = binary.size().height;
-
-    for (int line = 1; line < height - 2; line++)
-    {
-        uchar *upper = binary.ptr<uchar>(line - 1);
-        uchar *condu = origin.ptr<uchar>(line - 1);
-        uchar *cond1 = origin.ptr<uchar>(line);
-        uchar *cond2 = origin.ptr<uchar>(line + 1);
-        uchar *condl = binary.ptr<uchar>(line + 2);
-        uchar *lower = binary.ptr<uchar>(line + 2);
-
-        for (int col = 1; col < width - 2; col++)
-        {
-            if (cond1[col + 1] > 0 && cond2[col] > 0 &&
-                (cond1[col - 1] + condl[col + 1] + condu[col] + cond1[col + 2] == 0))
-            {
-                upper[col + 2] = 255;
-                lower[col - 1] = 255;
-            }
-        }
-    }
-}
-
-void elongate_backward_oblique(cv::Mat &binary)
-{
-
-    cv::Mat origin;
-    binary.copyTo(origin);
-    int width = binary.size().width;
-    int height = binary.size().height;
-
-    for (int line = 1; line < height - 2; line++)
-    {
-        uchar *upper = binary.ptr<uchar>(line - 1);
-        uchar *condu = origin.ptr<uchar>(line - 1);
-        uchar *cond1 = origin.ptr<uchar>(line);
-        uchar *cond2 = origin.ptr<uchar>(line + 1);
-        uchar *condl = binary.ptr<uchar>(line + 2);
-        uchar *lower = binary.ptr<uchar>(line + 2);
-
-        for (int col = 1; col < width - 2; col++)
-        {
-            if (cond1[col] > 0 && cond2[col + 1] > 0 &&
-                (cond2[col - 1] + condu[col + 1] + condl[col] + cond1[col + 2] == 0))
-            {
-                upper[col - 1] = 255;
-                lower[col + 2] = 255;
-            }
-        }
-    }
-}
-
-void elongate_vertical(cv::Mat &binary)
-{
-
-    cv::Mat origin;
-    binary.copyTo(origin);
-    int width = binary.size().width;
-    int height = binary.size().height;
-
-    for (int line = 1; line < height - 2; line++)
-    {
-        uchar *upper = binary.ptr<uchar>(line - 1);
-        uchar *cond1 = origin.ptr<uchar>(line);
-        uchar *cond2 = origin.ptr<uchar>(line + 1);
-        uchar *lower = binary.ptr<uchar>(line + 2);
-
-        for (int col = 1; col < width; col++)
-        {
-            if (cond1[col] > 0 && cond2[col] > 0)
-            {
-                upper[col] = 255;
-                lower[col] = 255;
-            }
-        }
-    }
-}
-
-void elongate_horizontal(cv::Mat &binary)
-{
-
-    cv::Mat origin;
-    binary.copyTo(origin);
-    int width = binary.size().width;
-    int height = binary.size().height;
-
-    for (int line = 0; line < height; line++)
-    {
-        uchar *row = binary.ptr<uchar>(line);
-        uchar *orig = origin.ptr<uchar>(line);
-
-        for (int col = 1; col < width - 2; col++)
-        {
-            if (orig[col] > 0 && orig[col + 1] > 0)
-            {
-                row[col - 1] = 255;
-                row[col + 2] = 255;
-            }
-        }
-    }
-}
-
-void meet_vertical(cv::Mat &binary)
-{
-
-    cv::Mat origin;
-    binary.copyTo(origin);
-    int width = binary.size().width;
-    int height = binary.size().height;
-
-    for (int line = 1; line < height - 1; line++)
-    {
-        uchar *meet = binary.ptr<uchar>(line);
-        uchar *cond1 = origin.ptr<uchar>(line - 1);
-        uchar *cond2 = origin.ptr<uchar>(line + 1);
-
-        for (int col = 1; col < width; col++)
-        {
-            if (cond1[col] > 0 && cond2[col] > 0)
-            {
-                meet[col] = 255;
-            }
-        }
-    }
-}
-
-void meet_horizontal(cv::Mat &binary)
-{
-
-    cv::Mat origin;
-    binary.copyTo(origin);
-    int width = binary.size().width;
-    int height = binary.size().height;
-
-    for (int line = 0; line < height; line++)
-    {
-        uchar *row = binary.ptr<uchar>(line);
-        uchar *orig = origin.ptr<uchar>(line);
-
-        for (int col = 1; col < width - 1; col++)
-        {
-            if (orig[col - 1] > 0 && orig[col + 1] > 0)
-            {
-                row[col] = 255;
-            }
-        }
-    }
 }
 
 void reverse(cv::Mat &binary)
@@ -1739,72 +1411,6 @@ double distance(cv::Point2d p1, cv::Point2d p2)
     return sqrt(pow(p1.x - p2.x, 2) + pow(p1.y - p2.y, 2));
 }
 
-double levene(int n1, int n2, double *arr1, double *arr2)
-{
-    double *deviance1 = (double *)malloc(sizeof(double) * n1);
-    double *deviance2 = (double *)malloc(sizeof(double) * n2);
-    double sum1 = 0, sum2 = 0;
-    double dev1 = 0, dev2 = 0;
-    double sqdev1 = 0, sqdev2 = 0;
-
-    for (int i = 0; i < n1; i++)
-        sum1 += arr1[i];
-    for (int i = 0; i < n2; i++)
-        sum2 += arr2[i];
-
-    for (int i = 0; i < n1; i++)
-    {
-        deviance1[i] = fabs(arr1[i] - sum1 / n1);
-        dev1 += deviance1[i];
-    }
-
-    for (int i = 0; i < n2; i++)
-    {
-        deviance2[i] = fabs(arr2[i] - sum2 / n1);
-        dev2 += deviance2[i];
-    }
-
-    dev1 /= n1;
-    dev2 /= n2;
-
-    for (int i = 0; i < n1; i++)
-        sqdev1 += pow(deviance1[i] - dev1, 2);
-    for (int i = 0; i < n2; i++)
-        sqdev2 += pow(deviance2[i] - dev2, 2);
-
-    double devm = (dev1 + dev2) * 0.5;
-    double m = (n1 + n2 - 2) *
-               (n1 * pow(dev1 - devm, 2) + n2 * pow(dev2 - devm, 2)) /
-               (sqdev1 + sqdev2);
-
-    return 1 - pf(m, 1, n1 + n2 - 2, TRUE, FALSE);
-}
-
-double t(int n1, int n2, double *arr1, double *arr2)
-{
-
-    double mean1 = 0, mean2 = 0;
-    double s1 = 0, s2 = 0;
-
-    for (int i = 0; i < n1; i++)
-        mean1 += arr1[i];
-    for (int i = 0; i < n2; i++)
-        mean2 += arr2[i];
-    mean1 /= n1;
-    mean2 /= n2;
-
-    for (int i = 0; i < n1; i++)
-        s1 += pow(arr1[i] - mean1, 2);
-    for (int i = 0; i < n2; i++)
-        s2 += pow(arr1[i] - mean2, 2);
-    s1 /= (n1 - 1);
-    s2 /= (n2 - 1);
-
-    return (mean1 - mean2) /
-           sqrt((((n1 - 1.) * s1 + (n2 - 1.) * s2) / (n1 + n2 - 2.)) *
-                (1. / n1 + 1. / n2));
-}
-
 int imax(int n, double *arr)
 {
     int i = 0;
@@ -1855,22 +1461,6 @@ int amin(int n, double *arr)
             i = j;
         }
     return m;
-}
-
-double normal(int n, double *arr, double x)
-{
-
-    double sum = 0;
-    double dev = 0;
-
-    for (int i = 0; i < n; i++)
-        sum += arr[i];
-    for (int i = 0; i < n; i++)
-        dev += pow(arr[i] - (sum / n), 2);
-    int mean = sum / n;
-    int stdvar = sqrt(dev / (n - 1));
-    double p = pnorm(x, mean, stdvar, TRUE, FALSE);
-    return p > 0.5 ? 1 - p : p;
 }
 
 double mean(int n, double *arr)
