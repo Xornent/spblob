@@ -4,8 +4,8 @@
 // enable color filtering: the anchor triangles will be filtered to retain
 //     those with perceptible red color.
 
-#define red_thresh (40)
-#define size_thresh (200)
+int red_thresh = (40);
+int size_thresh = (50);
 #define filter_color
 
 // anchor detection modes:
@@ -106,8 +106,10 @@ static char doc[] =
     "image segmentation with a watershed-like algorithm.";
 
 static char args_doc[] = 
-    "[--save-start N] [--raw RAW] [--stat STAT] [--scale SCALE] [--size SIZE] [--proximal PROX] "
-    "[--distal DIST] [-o OUTPUT] [-d] [-f] INPUT";
+    "[--save-start N] [--raw RAW] [--stat STAT] \n"
+    "[--scale SCALE] [--size SIZE] [--proximal PROX] [--distal DIST] \n"
+    "[--posang-size PSIZE] [--posang-thresh PTHRESH] \n"
+    "[-o OUTPUT] [-d] [-f] INPUT";
 
 #ifdef unix
 static struct argp_option options[] = {
@@ -119,6 +121,8 @@ static struct argp_option options[] = {
       "based detection routine. this takes the perpendicular edge length of the positioning triangle "
       "to be unified into fold changes from 10px. the default value requires that for each output image, "
       "the positioning triangle should have an edge length of 26px. (2.6)" },
+    { "posang-size", 'y', "PSIZE", 0, "the minimal size of the positioning angle (50)" },
+    { "posang-thresh", 'z', "PTHRESH", 0, "the red visual intensity threshold for the positioning angle (40)" },
     { "size", 's', "SIZE", 0, "resolution for the final image. stating that every 1 "
       "unit in --scale should represent 60px in the dataset image. (60.0)"},
     { "proximal", 'p', "PROX", 0, "proximal detetion position (270.0)" },
@@ -176,6 +180,12 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
         case 'f':
             arguments -> fname_as_sample = true;
             break;
+        case 'y':
+            size_thresh = atoi(arg);
+            break;
+        case 'z':
+            red_thresh = atoi(arg);
+            break;
         case ARGP_KEY_ARG:
             strcpy(arguments -> input, arg);
             break;
@@ -213,7 +223,7 @@ int main(int argc, char *argv[])
     argp_parse(&argp, argc, argv, 0, 0, &arguments);
 #else
 
-    if (argc != 12) {
+    if (argc != 14) {
         printf(args_doc);
         return 1;
     }
@@ -238,13 +248,16 @@ int main(int argc, char *argv[])
 
     arguments.distal = atof(argv[7]);
     c_distal = arguments.distal;
+
+    size_thresh = atoi(argv[8]);
+    red_thresh = atoi(argv[9]);
     
-    strcpy(arguments.data_output_path, argv[8]);
-    strcpy(datapath, argv[8]);
+    strcpy(arguments.data_output_path, argv[10]);
+    strcpy(datapath, argv[10]);
      
-    arguments.directory = strcmp(argv[9], "-d") == 0;
-    arguments.fname_as_sample = strcmp(argv[10], "-f") == 0;
-    strcpy(arguments.input, argv[11]);
+    arguments.directory = strcmp(argv[11], "-d") == 0;
+    arguments.fname_as_sample = strcmp(argv[12], "-f") == 0;
+    strcpy(arguments.input, argv[13]);
 
 #endif
 
@@ -382,8 +395,8 @@ double process(char *file, char* purefname, bool show_msg, struct arguments* arg
     double zoom = anch.zoom;
     printf("zoom: %.4f \n", zoom);
 
-    if (isnan(zoom)) {
-        printf("  [e] nan error. \n");
+    if (isnan(zoom) || zoom < 0) {
+        printf("  [e] aborting. \n");
         return 0;
     }
 
@@ -443,6 +456,12 @@ double process(char *file, char* purefname, bool show_msg, struct arguments* arg
                     (meeting_points[i].second.y + meeting_points[j].second.y) * 0.5));
             }
         }
+    }
+
+    if (paired.size() == 0) {
+        printf("  [e] no paired positioning triangles detected. \n");
+        printf("  [e] aborting. \n");
+        return 0;
     }
 
     // correct the scale factor zoom
@@ -1263,6 +1282,13 @@ void filter_mean_color(cv::Mat &colored, anchors_t &anchors)
         total_length += cv::arcLength(contours[filter_indices[j]], true);
     }
 
+    if (filter_indices.size() == 0) {
+        printf("  [e] no valid positioning angle passed for the color filter\n");
+        printf("  [e] this probably because the image is too small, or the redness of triangle being \n");
+        printf("  [e] influcenced by the photographing conditions. consider -y and -z options. \n");
+        anchors.zoom = -1;
+    }
+
     total_length /= filter_indices.size();
     free(anchors.vertices);
 
@@ -1280,7 +1306,6 @@ void filter_mean_color(cv::Mat &colored, anchors_t &anchors)
 
 void reverse(cv::Mat &binary)
 {
-
     int width = binary.size().width;
     int height = binary.size().height;
 
@@ -1300,7 +1325,6 @@ void reverse(cv::Mat &binary)
 
 void color_significance(cv::Mat &hsv, cv::Mat &grayscale, double orient)
 {
-
     int width = hsv.size().width;
     int height = hsv.size().height;
 
@@ -1465,7 +1489,6 @@ int amin(int n, double *arr)
 
 double mean(int n, double *arr)
 {
-
     double sum = 0;
     for (int i = 0; i < n; i++)
         sum += arr[i];
