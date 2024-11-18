@@ -26,3 +26,6 @@ blobroi-win: blobroi.cpp blobroi.h blob.cpp blob.h
 
 blobshed: blobshed.cpp blobshed.h blob.cpp blob.h
 	$(cpp) blob.cpp blobshed.cpp blobshed.h blob.h $(inc) $(lib) -o blobshed -Dunix $(debug)
+
+blobshed-win: blobshed.cpp blobshed.h blob.cpp blob.h
+	$(cpp) blob.cpp blobshed.cpp blobshed.h blob.h $(inc) $(lib) -o blobshed $(debug)

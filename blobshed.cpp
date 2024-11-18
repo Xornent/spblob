@@ -40,6 +40,27 @@ static char datapath[1024] = ".";
 
 // ============================================================================
 
+// windows do not support the glibc's getline function, we need to write our
+// own version to use it:
+
+#ifndef unix
+
+#define max_line_len 65535
+ssize_t getline(char **lineptr, size_t *n, FILE *stream) {
+    char* line = (char*) malloc(max_line_len);
+    char* result = fgets(line, max_line_len - 1, stream);
+    
+    if (result == NULL) return -1;
+    line[max_line_len - 1] = '\0';
+    *n = strlen(line);
+    *lineptr = line;
+    return strlen(line);
+}
+
+#endif
+
+// ============================================================================
+
 // argument parser
 
 static char doc[] = 
