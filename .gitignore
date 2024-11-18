@@ -4,10 +4,14 @@ test
 spblob*
 dataset
 annots
+bin
+out
 
 *.o
 *.a
 
 .Rprofile
 
-out
+blobroi
+blobshed
+blobnn

@@ -5,28 +5,48 @@
 1   introduction
 ----------------
 
-    spblob is a software for quantification of stained semen patches on certain
-    test papers.
+    spblob is a collection of routines for the detection and quantification of
+    optical intensity, produced by a test paper system for measurement of sperm
+    concentration of human semen samples.
+
+    these includes a detection program that extract uniformed faces of the paper
+    and a feature extraction program to quantify the shade of the semen blob.
+    the detection program `blobroi' is shared and act as the preprocessing step,
+    generating an output directory containing the uniformed source images and
+    scale bars for correcting luminance and contrast of different photographing
+    conditions. the extraction program is implemented using different technologies
+    and models (`blobshed' using a watershed-like algorithm, `blobnn' using 
+    convolutional neural network models, and available in both cpu and gpu-
+    accelerated distributions), accepting the same directory as input.
+
+    for more details on the output format, see section 3 below.
+    training code of the accompanying neural network model will be hosted on
+    <https://github.com/yang-z-03/spblob-nn>
 
 
 2   usage
 ---------
 
-    usage: spblob [--save-start N] [--raw RAW] [--stat STAT]
-                  [--scale SCALE] [--size SIZE] [--proximal PROX] [--distal DIST]
-                  [--posang-size PSIZE] [--posang-thresh PTHRESH]
-                  [-o OUTPUT] [-d] [-f] INPUT
+    usage: blobroi [--save-start N]
+                   [--scale SCALE] [--size SIZE] [--proximal PROX] [--distal DIST]
+                   [--posang-size PSIZE] [--posang-thresh PTHRESH]
+                   [-o OUTPUT] [-d] [-f] INPUT
     
-    spblob [conventional]: detect intensity parameters from semen patches on test
-    papers. this software does not rely on neural network model. but entirely by
-    traditional image segmentation with a watershed-like algorithm.
+    blobroi: detect and extract regions-of-interest from semen patches on test
+    papers. this is the first step in the spblob routines (blobroi, blobshed,
+    blobnn). and as the shared step for sample image preprocessing. this program
+    reads one or a directory of photographs (in *.jpg format) of test papers,
+    detect each paper by the positioning triangle, and yields in a specified output
+    folder the faces and scales of the test papers with roughly uniform size. the
+    same output folder should be specified as input data for later feature
+    extraction routines (blobshed or blobnn, one of them), using methods either
+    derived from watershed-like algorithm or neural network model for object
+    segmentation.
 
-      -a, --stat            location of the statistics summary file. (stats.tsv)
       -d, --dir             input be a directory of images in *.jpg.
       -f, --fas             filename as sample, accept the file name of the image as
                             the sample name without prompting the user to enter the
                             sample names manually.
-      -l, --raw             location of the output raw data file. (raw.tsv)
       -n, --save-start      starting index of the output dataset clips. (0)
       -o, --output          dataset output directory. must exist prior to running
       -p, --proximal        proximal detetion position. (270.0)
@@ -39,18 +59,112 @@
                             the positioning triangle to be unified into fold changes
                             from 10px. the default value requires that for each output
                             image, the positioning triangle should have an edge length
-                            of 26px. (2.6)
+                            of 26px.) (2.6)
       -y, --posang-size     the minimal size of the positioning angle. (50)
       -z, --posang-thresh   the red visual intensity threshold for the positioning angle. (40)
       -?, --help            give this help list.
           --usage           give a short usage message.
       -V, --version         print program version.
 
+    usage: blobshed [OPTION...] [--start M] [--end N] [SOURCE]
+
+    blobshed: detect the intensity of semen patches from extracted uniform
+    datasets. this routine runentirely using traditional image segmentation methods
+    with a watershed-like algorithm. 
+
+      -m, --start=M         starting index (included) of the uid. (0)
+      -n, --end=N           ending index (included) of the uid. (int32-max)
+      -?, --help            give this help list
+          --usage           give a short usage message
+      -V, --version         print program version
+
+    these softwares are free softwares licensed under gnu gplv3. it comes with
+    absolutely no warranty. for details, see
+    <https://www.gnu.org/licenses/gpl-3.0.html>
+
     mandatory or optional arguments to long options are also mandatory or optional
     for any corresponding short options.
 
 
-3   licensing
+3   outputs
+-----------
+
+    the program should be run as a sequential:
+
+    (1) preprocess, get detections from the photographs:
+
+        mkdir ./out
+        ./blobroi -o out -f test/r100.1115.jpg
+    
+    (2) get the geometrical features for each of the detections:
+
+        ./blobshed out
+    
+    by now, the output folder will look like:
+
+        out
+        ├── annots
+        │   ├── 1.jpg
+        │   ├── 2.jpg
+        │   ...
+        ├── masks
+        │   ├── 1.jpg
+        │   ├── 2.jpg
+        │   ...
+        ├── scales
+        │   ├── 1.jpg
+        │   ├── 2.jpg
+        │   ...
+        ├── scales.annot
+        │   ├── 1.jpg
+        │   ├── 2.jpg
+        │   ...
+        ├── sources
+        │   ├── 1.jpg
+        │   ├── 2.jpg
+        │   ...
+        ├── raw.tsv
+        ├── rois.tsv
+        └── stats.tsv
+    
+    the `rois.tsv' file is generated with `blobroi' command. and contains 17 columns:
+    
+     [1] the unique index of each detection, specified using --save-start.
+     [2] the source photograph location.
+     [3] index within the same image.
+     [4] sample name, if -f is specified, the same as the input file name.
+     [5] whether this image is extracted successfully, 'x' for yes, and '.' for no.
+     [6] whether the scale card is extracted successfully.
+     [7] the darker foreground of the scale card, from 0 to 255 grayscale.
+     [8] the lighter background of the scale card, from 0 to 255 grayscale.
+     [9] the size of the foreground circle. (may be inaccurate.)
+    [10] and [11]: x and y coordinates of the detection.
+    [13] and [14]: x and y coordinates of the base point for paper rectangle extraction.
+    [15] height of the output image, the widths is always 350px.
+    [16] the zoom of the image to get the uniformed outputs.
+    [17] and [18]: the orientation vector specifying the axis of the test paper.
+
+    the `blobroi` also generates scales/* scales.annot/* and sources/*, which dumps
+    the images of each detection for later step. the files is named according to the
+    unique ids (column [1]). the extraction program extract the blob surface and the
+    backgrounds in the uniformed test paper surface (sources/*) and dumps two data files
+    at the same output directory `raw.tsv' and `stats.tsv'.
+
+    the columns of the `raw.tsv' are:
+
+     [1] to [6]: the same as `rois.tsv'.
+     [7]: whether the detection program finds a blob in the surface. if '.', indicates
+          that the blob detection fails in this image.
+     [8]: mean foreground (the blob) grayscale.
+     [9]: foreground size in pixel.
+    [10]: the strict background grayscale.
+    [11]: the lesser background grayscale. this contains more regions in the backgrounds
+          which may include those dirty parts of the surface.
+    [12] and [13]: copied from [7] and [8] columns in `rois.tsv'.
+
+
+
+4   licensing
 -------------
 
     part of the software (distrib.c, distrib.h and bratio.c) are from GNU R,
@@ -72,5 +186,5 @@
     report bugs to yang-z. <xornent@outlook.com>.
 
 
-last update: nov. 17, 2024.
+last update: nov. 18, 2024.
 yang-z.

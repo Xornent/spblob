@@ -1,37 +1,8 @@
 
 #include <opencv2/opencv.hpp>
 
-struct arguments {
-    int save_count;
-    char log_file_path[1024];
-    char stat_file_path[1024];
-    char data_output_path[1024];
-    double scale_factor;
-    double pair_distance;
-    double scale_width;
-    double proximal;
-    double distal;
-    char input[1024];
-    bool directory;
-    bool fname_as_sample;
-};
-
-typedef struct anchors {
-    int detections;
-    int* vertices;
-    double zoom;
-} anchors_t;
-
-double process(char *file, char* purefname, bool show_msg, struct arguments* args);
-
-void anchor(cv::Mat &image, anchors_t &anchors, double prepzoom);
-void filter_mean_color(cv::Mat &colored, anchors_t &anchors);
 void reverse(cv::Mat &binary);
 void color_significance(cv::Mat &hsv, cv::Mat &grayscale, double orient);
-
-std::vector< std::pair< uchar, int >> extract_line(
-    cv::Mat &grayscale, cv::Point start, cv::Point end
-);
 
 double distance(cv::Point2d p1, cv::Point2d p2);
 
@@ -44,6 +15,10 @@ int boundary(cv::Mat &grayscale, cv::Point2d origin, cv::Point2d step, int maxim
 uchar bilinear(uchar p1, uchar p2, uchar p3, uchar p4, double x, double y);
 uchar get_bilinear(cv::Mat &grayscale, double x, double y);
 void infect(cv::Mat& grayscale, cv::Mat& out, cv::Point init, double cutoff);
+
+std::vector< std::pair< uchar, int >> extract_line(
+    cv::Mat &grayscale, cv::Point start, cv::Point end
+);
 
 void extract_flank(
     cv::Mat &grayscale, cv::Mat &out, cv::Point2d origin,
