@@ -7,6 +7,8 @@
 
 #ifdef unix
 #include <argp.h>
+#else
+#include "argparse/argparse.hpp"
 #endif
 
 namespace fs = std::filesystem;
@@ -86,7 +88,7 @@ static struct argp_option options[] = {
     { 0 }
 };
 
-const char* argp_program_version = "spblob:blobnn 1.3";
+const char* argp_program_version = "spblob:blobnn 1.5";
 const char* argp_program_bug_address = "yang-z. <xornent@outlook.com>";
 static error_t parse_opt(int key, char* arg, struct argp_state* state) {
 
@@ -128,15 +130,41 @@ int main(int argc, char* argv[])
     argp_parse(&argp, argc, argv, 0, 0, NULL);
 #else
 
-    if (argc != 5) {
-        printf("%s\n\n%s\n", doc, args_doc);
-        return 1;
+    argparse::ArgumentParser program("blobnn", "1.5");
+
+    program.add_argument("-m", "--start")
+        .help("starting index (included) of the uid. (0)")
+        .metavar("M")
+        .default_value(start_id)
+        .scan<'i', int>();
+
+    program.add_argument("-n", "--end")
+        .help("ending index (included) of the uid. (int32-max)")
+        .metavar("N")
+        .default_value(end_id)
+        .scan<'i', int>();
+
+    program.add_argument("-t", "--model")
+        .help("path to the torch script model (*.pt)")
+        .metavar("PT");
+
+    program.add_argument("source")
+        .help("the directory of blobroi's output, as the input")
+        .metavar("SOURCE");
+
+    program.add_description(doc);
+    
+    try { program.parse_args(argc, argv); }
+    catch (const std::exception& err) {
+        std::cerr << err.what() << std::endl;
+        std::cerr << program;
+        std::exit(1);
     }
 
-    start_id = atoi(argv[1]);
-    end_id = atoi(argv[2]);
-    strcpy(modelfpath, argv[3]);
-    strcpy(datapath, argv[4]);
+    start_id = program.get<int>("--start");
+    end_id = program.get<int>("--end");
+    strcpy(modelfpath, program.get("--model").c_str());
+    strcpy(datapath, program.get("source").c_str());
 
 #endif
 
@@ -433,13 +461,32 @@ int process(bool show_msg,
         cv::findContours(binary, contours, cv::RETR_TREE, cv::CHAIN_APPROX_SIMPLE);
 
         int idc = 0;
+
+        // initialized to be blanked black.
+
+        fg = cv::Mat::zeros(roi.size(), CV_8U);
+        bgloose = cv::Mat::zeros(roi.size(), CV_8U);
+
+        std::vector<std::vector<cv::Point>> bginits;
+        std::vector<cv::Point> bginit1;
+        int padding = 5;
+
+        bginit1.push_back(cv::Point(padding, padding));
+        bginit1.push_back(cv::Point(roi.cols - padding, padding));
+        bginit1.push_back(cv::Point(roi.cols - padding, roi.rows - padding));
+        bginit1.push_back(cv::Point(padding, roi.rows - padding));
+        bginits.push_back(bginit1);
+        
+        cv::drawContours(bgloose, bginits, 0, cv::Scalar(255), cv::FILLED);
+
         for (auto cont : contours) {
+            
             double lenconts = cv::arcLength(cont, true);
             double area = cv::contourArea(cont, false);
             double ratio = lenconts * lenconts / area;
 
             if (area > 1000 && area < 50000) {
-                fg = cv::Mat::zeros(roi.size(), CV_8U);
+                
                 cv::drawContours(fg, contours, idc, cv::Scalar(255), cv::FILLED);
                 cv::drawContours(ol, contours, idc, cv::Scalar(0, 0, 255), 2);
                 detected = true;
@@ -449,26 +496,18 @@ int process(bool show_msg,
                 // we should just have the left and surrounding part of the surface
                 // only to avoid inclusion of the righter dark lines.
 
-                bgloose = cv::Mat::zeros(roi.size(), CV_8U);
                 cv::Rect bounds = cv::boundingRect(cont);
                 std::vector<std::vector<cv::Point>> bgcont;
                 std::vector<cv::Point> bgcont1;
-                int padding = 5;
-                bgcont1.push_back(cv::Point(padding, padding));
-                bgcont1.push_back(cv::Point(bounds.x + bounds.width, padding));
-                bgcont1.push_back(cv::Point(bounds.x + bounds.width, roi.rows - padding));
-                bgcont1.push_back(cv::Point(padding, roi.rows - padding));
+                
+                bgcont1.push_back(cv::Point(bounds.x + bounds.width, 0));
+                bgcont1.push_back(cv::Point(roi.cols, 0));
+                bgcont1.push_back(cv::Point(roi.cols, roi.rows));
+                bgcont1.push_back(cv::Point(bounds.x + bounds.width, roi.rows));
                 bgcont.push_back(bgcont1);
 
-                cv::drawContours(bgloose, bgcont, 0, cv::Scalar(255), cv::FILLED);
+                cv::drawContours(bgloose, bgcont, 0, cv::Scalar(0), cv::FILLED);
                 cv::drawContours(bgloose, contours, idc, cv::Scalar(0), cv::FILLED);
-
-                cv::Mat kernel_full = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 3));
-                cv::morphologyEx(
-                    bgloose, bgstrict,
-                    cv::MORPH_ERODE, kernel_full,
-                    cv::Point(-1, -1), padding
-                );
 
                 // we noticed that some neural network modules may be trained
                 // to report hollow circles with two (inner and outer) boundaries,
@@ -480,6 +519,13 @@ int process(bool show_msg,
             else cv::drawContours(ol, contours, idc, cv::Scalar(0, 0, 0), 1);
             idc++;
         }
+
+        cv::Mat kernel_full = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 3));
+        cv::morphologyEx(
+            bgloose, bgstrict,
+            cv::MORPH_ERODE, kernel_full,
+            cv::Point(-1, -1), padding
+        );
 
         // draw the visualization map.
 

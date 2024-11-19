@@ -134,6 +134,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="argparse\argparse.hpp" />
     <ClInclude Include="blob.h" />
     <ClInclude Include="blobshed.h" />
   </ItemGroup>

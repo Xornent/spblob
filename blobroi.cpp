@@ -58,6 +58,8 @@ int size_thresh = (50);
 
 #ifdef unix
 #include <argp.h>
+#else
+#include "argparse/argparse.hpp"
 #endif
 
 namespace fs = std::filesystem;
@@ -219,7 +221,7 @@ int main(int argc, char *argv[])
     arguments.save_count = save_count;
     strcpy(arguments.data_output_path, datapath);
     arguments.scale_factor = c_scale_factor;
-    arguments.scale_width = c_scale_width;
+    arguments.scale_width = 60.0;
     arguments.proximal = c_proximal;
     arguments.distal = c_distal;
     arguments.directory = false;
@@ -230,35 +232,108 @@ int main(int argc, char *argv[])
     argp_parse(&argp, argc, argv, 0, 0, &arguments);
 #else
 
-    if (argc != 12) {
-        printf("%s\n\n%s\n", doc, args_doc);
-        return 1;
+    argparse::ArgumentParser program("blobshed", "1.5");
+
+    program.add_argument("-n", "--save-start")
+        .help("starting index of the output dataset clips (0)")
+        .metavar("N")
+        .default_value(save_count)
+        .scan<'i', int>();
+
+    program.add_argument("-x", "--scale")
+        .help(
+            "the relative scale factor of the output dataset clips (the image dataset for later neural-network "
+            "based detection routine. this takes the perpendicular edge length of the positioning triangle "
+            "to be unified into fold changes from 10px. the default value requires that for each output image, "
+            "the positioning triangle should have an edge length of 26px. (2.6)" )
+        .metavar("SCALE")
+        .default_value(c_scale_factor)
+        .scan<'f', double>();
+
+    program.add_argument("-y", "--posang-size")
+        .help("the minimal size of the positioning angle (50)")
+        .metavar("PSIZE")
+        .default_value(size_thresh)
+        .scan<'i', int>();
+
+    program.add_argument("-z", "--posang-thresh")
+        .help("the red visual intensity threshold for the positioning angle (40)")
+        .metavar("PTHRESH")
+        .default_value(red_thresh)
+        .scan<'i', int>();
+
+    program.add_argument("-s", "--size")
+        .help("resolution for the final image. stating that every 1 "
+              "unit in --scale should represent 60px in the dataset image. (60.0)")
+        .metavar("SIZE")
+        .default_value(60.0)
+        .scan<'f', double>();
+
+    program.add_argument("-p", "--proximal")
+        .help("proximal detetion position (270.0)")
+        .metavar("PROX")
+        .default_value(c_proximal)
+        .scan<'f', double>();
+    
+    program.add_argument("-t", "--distal")
+        .help("distal detetion position (300.0)")
+        .metavar("DIST")
+        .default_value(c_distal)
+        .scan<'f', double>();
+
+    program.add_argument("-o", "--output")
+        .help("dataset output directory. must exist prior to running")
+        .metavar("OUTPUT")
+        .default_value(datapath);
+
+    program.add_argument("-d", "--dir")
+        .help("input be a directory of images in *.jpg")
+        .default_value(false)
+        .implicit_value(true);
+
+    program.add_argument("-f", "--fas")
+        .help("filename as sample name, accept the file name of the image as the sample name "
+              "without prompting the user to enter the sample names manually")
+        .default_value(false)
+        .implicit_value(true);
+
+    program.add_argument("input")
+        .help("the input image, or a directory of images (when specifying -d)")
+        .metavar("input");
+
+    program.add_description(doc);
+
+    try { program.parse_args(argc, argv); }
+    catch (const std::exception& err) {
+        std::cerr << err.what() << std::endl;
+        std::cerr << program;
+        std::exit(1);
     }
 
-    arguments.save_count = atoi(argv[1]);
+    arguments.save_count = program.get<int>("-n");
     save_count = arguments.save_count;
 
-    arguments.scale_factor = atof(argv[2]);
+    arguments.scale_factor = program.get<double>("--scale");
     c_scale_factor = arguments.scale_factor;
 
-    arguments.scale_width = atof(argv[3]);
+    arguments.scale_width = program.get<double>("--size");
     c_scale_width = arguments.scale_width * c_scale_factor;
 
-    arguments.proximal = atof(argv[4]);
+    arguments.proximal = program.get<double>("--proximal");
     c_proximal = arguments.proximal;
 
-    arguments.distal = atof(argv[5]);
+    arguments.distal = program.get<double>("--distal");
     c_distal = arguments.distal;
 
-    size_thresh = atoi(argv[6]);
-    red_thresh = atoi(argv[7]);
-    
-    strcpy(arguments.data_output_path, argv[8]);
-    strcpy(datapath, argv[8]);
-     
-    arguments.directory = strcmp(argv[9], "-d") == 0;
-    arguments.fname_as_sample = strcmp(argv[10], "-f") == 0;
-    strcpy(arguments.input, argv[11]);
+    size_thresh = program.get<int>("--posang-size");
+    red_thresh = program.get<int>("--posang-thresh");
+
+    strcpy(arguments.data_output_path, program.get("--output").c_str());
+    strcpy(datapath, program.get("--output").c_str());
+
+    arguments.directory = program.get<bool>("--dir");
+    arguments.fname_as_sample = program.get<bool>("--fas");
+    strcpy(arguments.input, program.get("input").c_str());
 
 #endif
     

@@ -9,6 +9,8 @@
 
 #ifdef unix
 #include <argp.h>
+#else
+#include "argparse/argparse.hpp"
 #endif
 
 namespace fs = std::filesystem;
@@ -80,7 +82,7 @@ static struct argp_option options[] = {
     { 0 }
 };
 
-const char *argp_program_version = "spblob:blobshed 1.3";
+const char *argp_program_version = "spblob:blobshed 1.5";
 const char *argp_program_bug_address = "yang-z. <xornent@outlook.com>";
 static error_t parse_opt(int key, char *arg, struct argp_state *state) {
     
@@ -114,14 +116,36 @@ int main(int argc, char* argv[])
     argp_parse(&argp, argc, argv, 0, 0, NULL);
 #else
 
-    if (argc != 4) {
-        printf("%s\n\n%s\n", doc, args_doc);
-        return 1;
+    argparse::ArgumentParser program("blobshed", "1.5");
+
+    program.add_argument("-m", "--start")
+        .help("starting index (included) of the uid. (0)")
+        .metavar("M")
+        .default_value(start_id)
+        .scan<'i', int>();
+
+    program.add_argument("-n", "--end")
+        .help("ending index (included) of the uid. (int32-max)")
+        .metavar("N")
+        .default_value(end_id)
+        .scan<'i', int>();
+
+    program.add_argument("source")
+        .help("the directory of blobroi's output, as the input")
+        .metavar("SOURCE");
+
+    program.add_description(doc);
+
+    try { program.parse_args(argc, argv); }
+    catch (const std::exception& err) {
+        std::cerr << err.what() << std::endl;
+        std::cerr << program;
+        std::exit(1);
     }
 
-    start_id = atoi(argv[1]);
-    end_id = atoi(argv[2]);
-    strcpy(datapath, argv[3]);
+    start_id = program.get<int>("--start");
+    end_id = program.get<int>("--end");
+    strcpy(datapath, program.get("source").c_str());
 
 #endif
     
