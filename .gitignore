@@ -1,5 +1,13 @@
 
 .vscode
+.vs
+
+blobnn-cpu
+blobnn-cuda
+blobroi
+blobshed
+x64
+
 test
 spblob*
 dataset
@@ -9,6 +17,8 @@ out
 
 *.o
 *.a
+*.vcxproj.filters
+*.vcxproj.user
 
 .Rprofile
 

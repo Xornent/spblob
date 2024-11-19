@@ -14,6 +14,7 @@
 //    You should have received a copy of the GNU General Public License
 //    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+#include "blobroi.h"
 
 // conditional compilation switches ===========================================
 
@@ -65,9 +66,6 @@ namespace chrono = std::chrono;
 #include <opencv2/opencv.hpp>
 #include <opencv2/highgui.hpp>
 #include <opencv2/calib3d.hpp>
-#include <opencv2/plot.hpp>
-
-#include "blobroi.h"
 
 // ============================================================================
 

@@ -1,12 +1,11 @@
 
+#include "blob.h"
+
 #include <opencv2/opencv.hpp>
 #include <opencv2/highgui.hpp>
 #include <opencv2/calib3d.hpp>
-#include <opencv2/plot.hpp>
 
-#include "blob.h"
-
-void show(cv::Mat &matrix, const char *window, int width, int height)
+void show(cv::Mat& matrix, const char* window, int width, int height)
 {
     cv::namedWindow(window, cv::WINDOW_NORMAL);
     cv::resizeWindow(window, width, height);
@@ -15,14 +14,14 @@ void show(cv::Mat &matrix, const char *window, int width, int height)
     cv::destroyAllWindows();
 }
 
-void reverse(cv::Mat &binary)
+void reverse(cv::Mat& binary)
 {
     int width = binary.size().width;
     int height = binary.size().height;
 
     for (int line = 0; line < height; line++)
     {
-        uchar *row = binary.ptr<uchar>(line);
+        uchar* row = binary.ptr<uchar>(line);
         for (int col = 1; col < width; col++)
         {
             row[col] = 255 - row[col];
@@ -34,22 +33,22 @@ void reverse(cv::Mat &binary)
 // the hsv colorspace: cos(delta.H) * S * V.
 // orient: the hue [0, 360] to extract color intensity, 0 as red.
 
-void color_significance(cv::Mat &hsv, cv::Mat &grayscale, double orient)
+void color_significance(cv::Mat& hsv, cv::Mat& grayscale, double orient)
 {
     int width = hsv.size().width;
     int height = hsv.size().height;
 
     for (int line = 0; line < height; line++)
     {
-        cv::Vec3b *rhsv = hsv.ptr<cv::Vec3b>(line);
-        uchar *rgray = grayscale.ptr<uchar>(line);
+        cv::Vec3b* rhsv = hsv.ptr<cv::Vec3b>(line);
+        uchar* rgray = grayscale.ptr<uchar>(line);
 
         for (int col = 1; col < width; col++)
         {
             double hue = 2.0 * rhsv[col][0];
             double proj = cos((hue - orient) * CV_PI / 180.0) *
-                          (rhsv[col][1] / 255.0) *
-                          (rhsv[col][2] / 255.0);
+                (rhsv[col][1] / 255.0) *
+                (rhsv[col][2] / 255.0);
 
             if (proj < 0)
                 proj = 0;
@@ -59,7 +58,7 @@ void color_significance(cv::Mat &hsv, cv::Mat &grayscale, double orient)
 }
 
 std::vector<std::pair<uchar, int>> extract_line(
-    cv::Mat &grayscale, cv::Point start, cv::Point end)
+    cv::Mat& grayscale, cv::Point start, cv::Point end)
 {
 
     std::vector<std::pair<uchar, int>> result;
@@ -72,7 +71,7 @@ std::vector<std::pair<uchar, int>> extract_line(
     int c2 = end.x;
 
     // distance between the two anchors
-    float dist = round(sqrt(pow(float(r2) - float(r1), 2.0) + pow(float(c2) - float(c1), 2.0)));
+    double dist = round(sqrt(pow(float(r2) - float(r1), 2.0) + pow(float(c2) - float(c1), 2.0)));
     if (dist <= 0.00001f)
     {
         // too short distance. return the origin point.
@@ -83,8 +82,8 @@ std::vector<std::pair<uchar, int>> extract_line(
         return result;
     }
 
-    float slope_r = (float(r2) - float(r1)) / dist;
-    float slope_c = (float(c2) - float(c1)) / dist;
+    double slope_r = (float(r2) - float(r1)) / dist;
+    double slope_c = (float(c2) - float(c1)) / dist;
 
     int k = 0;
     for (float i = 0; i <= dist; ++i)
@@ -111,33 +110,12 @@ std::vector<std::pair<uchar, int>> extract_line(
     return result;
 }
 
-void plot(int n, double vec[], const char *title)
-{
-    cv::Mat data_x(1, n, CV_64F);
-    cv::Mat data_y(1, n, CV_64F);
-
-    // fill the matrix with custom data.
-    for (int i = 0; i < data_x.cols; i++)
-    {
-        data_x.at<double>(0, i) = i;
-        data_y.at<double>(0, i) = vec[i];
-    }
-
-    cv::Mat plot_result;
-    cv::Ptr<cv::plot::Plot2d> plot = cv::plot::Plot2d::create(data_x, data_y);
-    plot->render(plot_result);
-
-    cv::imshow(title, plot_result);
-    cv::waitKey();
-    cv::destroyAllWindows();
-}
-
 double distance(cv::Point2d p1, cv::Point2d p2)
 {
     return sqrt(pow(p1.x - p2.x, 2) + pow(p1.y - p2.y, 2));
 }
 
-int imax(int n, double *arr)
+int imax(int n, double* arr)
 {
     int i = 0;
     double m = std::numeric_limits<double>::min();
@@ -150,7 +128,7 @@ int imax(int n, double *arr)
     return i;
 }
 
-int amax(int n, double *arr)
+double amax(int n, double* arr)
 {
     int i = 0;
     double m = std::numeric_limits<double>::min();
@@ -163,7 +141,7 @@ int amax(int n, double *arr)
     return m;
 }
 
-int imin(int n, double *arr)
+int imin(int n, double* arr)
 {
     int i = 0;
     double m = std::numeric_limits<double>::max();
@@ -176,7 +154,7 @@ int imin(int n, double *arr)
     return i;
 }
 
-int amin(int n, double *arr)
+double amin(int n, double* arr)
 {
     int i = 0;
     double m = std::numeric_limits<double>::max();
@@ -189,16 +167,16 @@ int amin(int n, double *arr)
     return m;
 }
 
-double mean(int n, double *arr)
+double mean(int n, double* arr)
 {
     double sum = 0;
     for (int i = 0; i < n; i++)
         sum += arr[i];
-    int mean = sum / n;
+    double mean = sum / n;
     return mean;
 }
 
-int boundary(cv::Mat &grayscale, cv::Point2d origin, cv::Point2d step, int maximal, double tolerance)
+int boundary(cv::Mat& grayscale, cv::Point2d origin, cv::Point2d step, int maximal, double tolerance)
 {
     double o = grayscale.at<uchar>(int(origin.y), int(origin.x)) * 1.0;
     std::vector<double> may_be_foregrounds;
@@ -206,9 +184,9 @@ int boundary(cv::Mat &grayscale, cv::Point2d origin, cv::Point2d step, int maxim
     // not confirming the foreground immediately, wait a few px.
     // since the decrease along the border may be smoothed.
 
-    int delay = 10; 
+    int delay = 10;
 
-    for (float i = 0; i <= maximal; ++i)
+    for (int i = 0; i <= maximal; ++i)
     {
         int posy = int(origin.y) + int(round(i * step.y));
         int posx = int(origin.x) + int(round(i * step.x));
@@ -239,7 +217,7 @@ int boundary(cv::Mat &grayscale, cv::Point2d origin, cv::Point2d step, int maxim
             int delayposy = int(origin.y) + int(round((i - delay) * step.y));
             int delayposx = int(origin.x) + int(round((i - delay) * step.x));
             uchar cd = grayscale.at<uchar>(delayposy, delayposx);
-            double mean_fore = mean(may_be_foregrounds.size(), may_be_foregrounds.data());
+            double mean_fore = mean(static_cast<int>(may_be_foregrounds.size()), may_be_foregrounds.data());
             if (c < 0.70 * mean_fore) return i;
             else may_be_foregrounds.push_back(cd * 1.0);
         }
@@ -255,7 +233,7 @@ uchar bilinear(uchar p1, uchar p2, uchar p3, uchar p4, double x, double y)
     return uchar(int(x1 + (x2 - x1) * y));
 }
 
-uchar get_bilinear(cv::Mat &grayscale, double x, double y)
+uchar get_bilinear(cv::Mat& grayscale, double x, double y)
 {
     int borderx = -1, bordery = -1;
     if (x < 0)
@@ -293,7 +271,7 @@ uchar get_bilinear(cv::Mat &grayscale, double x, double y)
 }
 
 void extract_flank(
-    cv::Mat &grayscale, cv::Mat &out, cv::Point2d origin,
+    cv::Mat& grayscale, cv::Mat& out, cv::Point2d origin,
     cv::Point2d orient, cv::Point2d up,
     int flank, int extend)
 {
@@ -331,8 +309,8 @@ void extract_flank(
 }
 
 uchar** matrix(cv::Mat& mat) {
-    uchar** ptrs = (uchar**) malloc(sizeof(uchar*) * mat.rows);
-    for (int r = 0; r < mat.rows; r ++) ptrs[r] = mat.ptr(r);
+    uchar** ptrs = (uchar**)malloc(sizeof(uchar*) * mat.rows);
+    for (int r = 0; r < mat.rows; r++) ptrs[r] = mat.ptr(r);
     return ptrs;
 }
 
@@ -341,8 +319,8 @@ uchar** matrix(cv::Mat& mat) {
 
 int infect_cell(
     uchar** inp, uchar** out, uchar** flag, int width, int height,
-    cv::Point center, std::queue<cv::Point> &next,
-    std::vector<double> &bg, double cutoff)
+    cv::Point center, std::queue<cv::Point>& next,
+    std::vector<double>& bg, double cutoff)
 {
     int x = center.x;
     int y = center.y;
@@ -412,7 +390,7 @@ int infect_cell(
     return is_dirty;
 }
 
-void infect(cv::Mat &grayscale, cv::Mat &out, cv::Point init, double cutoff)
+void infect(cv::Mat& grayscale, cv::Mat& out, cv::Point init, double cutoff)
 {
 
     std::queue<cv::Point> nexts;
@@ -468,57 +446,57 @@ void infect(cv::Mat &grayscale, cv::Mat &out, cv::Point init, double cutoff)
     }
 }
 
-void hist(cv::Mat &grayscale, cv::Mat mask) {
-    
-    const int channels[] = { 0 };
-	cv::Mat histo;
-	int dims = 1;
-	const int histSize[] = { 256 };
+void hist(cv::Mat& grayscale, cv::Mat mask) {
 
-	float pranges[] = { 0, 255 }; // for dimension 0.
-	const float* ranges[] = { pranges };
-	
-	cv::calcHist(
+    const int channels[] = { 0 };
+    cv::Mat histo;
+    int dims = 1;
+    const int histSize[] = { 256 };
+
+    float pranges[] = { 0, 255 }; // for dimension 0.
+    const float* ranges[] = { pranges };
+
+    cv::calcHist(
         &grayscale, 1, channels, mask, histo, dims,
         histSize, ranges, true, false
     );
 
     int scale = 2;
-	int hist_height = 256;
-	cv::Mat hist_img = cv::Mat::zeros(hist_height, 256 * scale, CV_8UC3);
-	
-    double max_val;
-	cv::minMaxLoc(histo, 0, &max_val, 0, 0);
+    int hist_height = 256;
+    cv::Mat hist_img = cv::Mat::zeros(hist_height, 256 * scale, CV_8UC3);
 
-	for (int i = 0; i < 256; i++)
-	{
-		float bin_val = histo.at<float>(i);
-		int intensity = cvRound(bin_val * hist_height / max_val);
-		cv::rectangle(
+    double max_val;
+    cv::minMaxLoc(histo, 0, &max_val, 0, 0);
+
+    for (int i = 0; i < 256; i++)
+    {
+        float bin_val = histo.at<float>(i);
+        int intensity = cvRound(bin_val * hist_height / max_val);
+        cv::rectangle(
             hist_img, cv::Point(i * scale, hist_height - 1),
             cv::Point((i + 1) * scale - 1, hist_height - intensity),
             cv::Scalar(255, 255, 255)
         );
-	}
+    }
 
     show(hist_img, "histogram");
 }
 
-int quartile(cv::Mat &grayscale, cv::Mat mask, double lower) {
-    
-    const int channels[] = { 0 };
-	cv::Mat histo;
-	int dims = 1;
-	const int histSize[] = { 256 };
+int quartile(cv::Mat& grayscale, cv::Mat mask, double lower) {
 
-	float pranges[] = { 0, 255 }; // for dimension 0.
-	const float* ranges[] = { pranges };
-	
-	cv::calcHist(
+    const int channels[] = { 0 };
+    cv::Mat histo;
+    int dims = 1;
+    const int histSize[] = { 256 };
+
+    float pranges[] = { 0, 255 }; // for dimension 0.
+    const float* ranges[] = { pranges };
+
+    cv::calcHist(
         &grayscale, 1, channels, mask, histo, dims,
         histSize, ranges, true, false
     );
-    
+
     float sum = 0, accum = 0;
     for (int i = 0; i < 256; i++) sum += histo.at<float>(i);
     for (int i = 0; i < 256; i++) {
@@ -529,22 +507,22 @@ int quartile(cv::Mat &grayscale, cv::Mat mask, double lower) {
     return 255;
 }
 
-int any(cv::Mat &binary) {
+int any(cv::Mat& binary) {
     int count = 0;
-    for (int r = 0; r < binary.rows; r ++) {
+    for (int r = 0; r < binary.rows; r++) {
         auto ptr = binary.ptr(r);
-        for(int c = 0; c < binary.cols; c ++) {
+        for (int c = 0; c < binary.cols; c++) {
             if (ptr[c] > 0) count += 1;
         }
     }
     return count;
 }
 
-int any_right(cv::Mat &binary, int col) {
+int any_right(cv::Mat& binary, int col) {
     int count = 0;
-    for (int r = 0; r < binary.rows; r ++) {
+    for (int r = 0; r < binary.rows; r++) {
         auto ptr = binary.ptr(r);
-        for(int c = col; c < binary.cols; c ++) {
+        for (int c = col; c < binary.cols; c++) {
             if (ptr[c] > 0) count += 1;
         }
     }

@@ -1,7 +1,5 @@
 
-#include "blobshed.h"
-
-#define higher_reach 4
+#include "blobnn.h"
 
 #include <iostream>
 #include <filesystem>
@@ -17,6 +15,9 @@ namespace chrono = std::chrono;
 #include <opencv2/opencv.hpp>
 #include <opencv2/highgui.hpp>
 #include <opencv2/calib3d.hpp>
+
+#include "torch/script.h"
+#include "torch/torch.h"
 
 // ============================================================================
 
@@ -37,6 +38,11 @@ static char rawfpath[1024] = "raw.tsv";
 static char statfpath[1024] = "stats.tsv";
 static char datapath[1024] = ".";
 
+using torch::jit::script::Module;
+static Module model;
+static char modelfpath[1024] = "";
+static bool isgpu = false;
+
 // ============================================================================
 
 // windows do not support the glibc's getline function, we need to write our
@@ -45,11 +51,12 @@ static char datapath[1024] = ".";
 #ifndef unix
 
 #define max_line_len 65535
+#define ssize_t int
 
-ssize_t getline(char **lineptr, size_t *n, FILE *stream) {
-    char* line = (char*) malloc(max_line_len);
+ssize_t getline(char** lineptr, size_t* n, FILE* stream) {
+    char* line = (char*)malloc(max_line_len);
     char* result = fgets(line, max_line_len - 1, stream);
-    
+
     if (result == NULL) return -1;
     line[max_line_len - 1] = '\0';
     *n = strlen(line);
@@ -63,41 +70,49 @@ ssize_t getline(char **lineptr, size_t *n, FILE *stream) {
 
 // argument parser
 
-static char doc[] = 
-    "blobshed: detect the intensity of semen patches from extracted uniform datasets. "
-    "this routine runentirely using traditional image segmentation methods with a "
-    "watershed-like algorithm. \n\n"
-    "this software is a free software licensed under gnu gplv3. it comes with absolutely "
-    "no warranty. for details, see <https://www.gnu.org/licenses/gpl-3.0.html>";
+static char doc[] =
+"blobnn: detect the intensity of semen patches from extracted uniform datasets. "
+"this routine utilizes a neural network model. (based on unet segmentation) \n\n"
+"this software is a free software licensed under gnu gplv3. it comes with absolutely "
+"no warranty. for details, see <https://www.gnu.org/licenses/gpl-3.0.html>";
 
-static char args_doc[] = 
-    "[--start M] [--end N] [SOURCE]";
+static char args_doc[] =
+"[--start M] [--end N] [--model PT] [SOURCE]";
 
 #ifdef unix
 static struct argp_option options[] = {
     { "start", 'm', "M", 0, "starting index (included) of the uid. (0)"},
     { "end", 'n', "N", 0, "ending index (included) of the uid. (int32-max)"},
+    { "model", 't', "PT", 0, "path to the torch script model (*.pt)"},
     { 0 }
 };
 
-const char *argp_program_version = "spblob:blobshed 1.3";
-const char *argp_program_bug_address = "yang-z. <xornent@outlook.com>";
-static error_t parse_opt(int key, char *arg, struct argp_state *state) {
-    
+const char* argp_program_version = "spblob:blobnn 1.3";
+const char* argp_program_bug_address = "yang-z. <xornent@outlook.com>";
+static error_t parse_opt(int key, char* arg, struct argp_state* state) {
+
     switch (key) {
-        case 'm':
-            start_id = atoi(arg);
-            break;
-        case 'n': 
-            end_id = atoi(arg);
-            break;
-        case ARGP_KEY_ARG:
-            strcpy(datapath, arg);
-            break;
-        case ARGP_KEY_END:
-            if (state -> arg_num != 1) argp_usage(state);
-            break;
-        default: return ARGP_ERR_UNKNOWN;
+    case 'm':
+        start_id = atoi(arg);
+        break;
+    case 'n':
+        end_id = atoi(arg);
+        break;
+    case 't':
+        strcpy(modelfpath, arg);
+        break;
+    case ARGP_KEY_ARG:
+        strcpy(datapath, arg);
+        break;
+    case ARGP_KEY_END:
+        if (state->arg_num != 1) argp_usage(state);
+
+        if (strlen(modelfpath) == 0) {
+            printf("[e] module path (.pt) is required \n");
+            exit(1);
+        }
+        break;
+    default: return ARGP_ERR_UNKNOWN;
     }
 
     return 0;
@@ -106,7 +121,7 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
 static struct argp argp = { options, parse_opt, args_doc, doc };
 #endif
 
-int main(int argc, char* argv[]) 
+int main(int argc, char* argv[])
 {
     // read the program parameters
 
@@ -114,17 +129,18 @@ int main(int argc, char* argv[])
     argp_parse(&argp, argc, argv, 0, 0, NULL);
 #else
 
-    if (argc != 4) {
+    if (argc != 5) {
         printf("%s\n\n%s\n", doc, args_doc);
         return 1;
     }
 
     start_id = atoi(argv[1]);
     end_id = atoi(argv[2]);
-    strcpy(datapath, argv[3]);
+    strcpy(modelfpath, argv[3]);
+    strcpy(datapath, argv[4]);
 
 #endif
-    
+
     // make sure the data path exist, and create subdirectories if they are not.
 
     std::string opath(datapath);
@@ -135,14 +151,14 @@ int main(int argc, char* argv[])
 
         // open the log file and append.
         // the log file of the blobroi routine is automatically set to be {out}/rois.tsv
-    
+
         char rfname[1024] = "\0";
         char sfname[1024] = "\0";
         strcpy(rfname, datapath); strcat(rfname, "/"); strcat(rfname, rawfpath);
         strcpy(rawfpath, rfname);
         strcpy(sfname, datapath); strcat(sfname, "/"); strcat(sfname, statfpath);
         strcpy(statfpath, sfname);
-        
+
         // both the rawfile and statfile are automatically maintained. (newer
         // detections will overwrite the older ones, and if not previously detected,
         // then append to the tail of the file. so we will read the old file first,
@@ -153,7 +169,7 @@ int main(int argc, char* argv[])
 
         FILE* read_raw = fopen(rawfpath, "r");
         FILE* read_stat = fopen(statfpath, "r");
-        char * line = NULL;
+        char* line = NULL;
 
         if (read_raw != NULL) {
             char* line = NULL;
@@ -164,11 +180,11 @@ int main(int argc, char* argv[])
             // them throughout the program's lifespan, do not free them!
 
             while ((read = getline(&line, &len, read_raw)) != -1) {
-                char* rline = (char*) malloc(len + 1);
+                char* rline = (char*)malloc(len + 1);
                 strncpy(rline, line, len);
                 rline[len] = '\0';
                 rawlines.push_back(rline);
-                
+
                 char* first_col = strchr(rline, '\t');
                 *first_col = '\0';
                 rawuids.push_back(atoi(rline));
@@ -184,7 +200,7 @@ int main(int argc, char* argv[])
             ssize_t read;
 
             while ((read = getline(&line, &len, read_stat)) != -1) {
-                char* sline = (char*) malloc(len + 1);
+                char* sline = (char*)malloc(len + 1);
                 strncpy(sline, line, len);
                 sline[len] = '\0';
                 statlines.push_back(sline);
@@ -201,7 +217,8 @@ int main(int argc, char* argv[])
         rawfile = fopen(rawfpath, "w");
         statfile = fopen(statfpath, "w");
 
-    } else {
+    }
+    else {
         printf("[e] data output path do not exist! \n");
         return 1;
     }
@@ -213,8 +230,47 @@ int main(int argc, char* argv[])
 
     if (fs::is_regular_file(roifpath)) {
         roifile = fopen(logfname, "r");
-    } else {
+    }
+    else {
         printf("[e] do not find rois.tsv under the source folder! \n");
+        return 1;
+    }
+
+    if (fs::is_regular_file(modelfpath)) {
+
+        printf("[i] loading model file from: %s \n", modelfpath);
+        model = torch::jit::load(modelfpath);
+
+        bool gpu = true;
+        if (torch::cuda::is_available()) {
+            printf("[i] cuda available on this device. \n");
+        }
+        else gpu = false;
+        if (torch::cuda::cudnn_is_available()) {
+            printf("[i] cudnn available on this device. \n");
+        }
+        else gpu = false;
+
+        if (gpu) {
+            printf("[i] found %d available gpu(s) installed on this device. \n",
+                torch::cuda::device_count());
+
+            printf("[i] transporting model to cuda \n");
+            model.eval();
+            model.to(at::kCUDA);
+            isgpu = true;
+
+        }
+        else {
+            printf("[i] transporting model to cpu \n");
+            model.eval();
+            model.to(at::kCPU);
+            isgpu = false;
+        }
+
+    }
+    else {
+        printf("[e] pytorch model not found or invalid! \n");
         return 1;
     }
 
@@ -231,10 +287,10 @@ int main(int argc, char* argv[])
     std::vector<int> scale_dark; std::vector<int> scale_light;
 
     while ((read = getline(&line, &len, roifile)) != -1) {
-        
-        if(len <= 1) continue;
 
-        char* sline = (char*) malloc(len + 1);
+        if (len <= 1) continue;
+
+        char* sline = (char*)malloc(len + 1);
         strncpy(sline, line, len);
         sline[len] = '\0';
 
@@ -243,7 +299,7 @@ int main(int argc, char* argv[])
         char* col = strchr(sline, '\t'); *col = '\0';
         int uidx = atoi(sline);
 
-        if (uidx >= start_id && uidx <= end_id) {  }
+        if (uidx >= start_id && uidx <= end_id) {}
         else { if (uidx > max_id) max_id = uidx; continue; }
 
         uid.push_back(uidx); sline = col + 1;
@@ -294,43 +350,19 @@ int main(int argc, char* argv[])
 }
 
 int process(bool show_msg,
-            std::vector<char*> sample_names, std::vector<char*> fnames,
-            std::vector<int> sid, std::vector<int> uid,
-            std::vector<bool> det_success, std::vector<cv::Mat> rois,
-            std::vector<bool> scale_success,
-            std::vector<int> scale_dark, std::vector<int> scale_light)
+    std::vector<char*> sample_names, std::vector<char*> fnames,
+    std::vector<int> sid, std::vector<int> uid,
+    std::vector<bool> det_success, std::vector<cv::Mat> rois,
+    std::vector<bool> scale_success,
+    std::vector<int> scale_dark, std::vector<int> scale_light)
 {
     std::vector< cv::Mat > back_strict;
     std::vector< cv::Mat > back_loose;
     std::vector< cv::Mat > foreground;
     std::vector< cv::Mat > overlap;
     std::vector< bool > has_foreground;
-    std::vector<cv::Mat> usms;
-
-    // generate the usm sharpened images from rois:
 
     int croi = 0;
-    for (auto roi : rois)
-    {
-        if (!det_success.at(croi)) {
-            usms.push_back(cv::Mat(cv::Size(3, 3), CV_8U, cv::Scalar(0)));
-            croi += 1;
-            continue;
-        }
-
-        cv::Mat blurred;
-        cv::GaussianBlur(roi, blurred, cv::Size(5, 5), 0);
-
-        cv::Mat blur_usm, usm;
-        cv::GaussianBlur(blurred, blur_usm, cv::Size(0, 0), 25);
-        cv::addWeighted(blurred, 1.5, blur_usm, -0.5, 0, usm);
-            
-        blur_usm.release();
-        usms.push_back(usm);
-        croi += 1;
-    }
-
-    /* int */ croi = 0;
     for (auto roi : rois)
     {
         if (!det_success.at(croi)) {
@@ -339,173 +371,94 @@ int process(bool show_msg,
             foreground.push_back(cv::Mat(cv::Size(3, 3), CV_8U, cv::Scalar(0)));
             overlap.push_back(cv::Mat(cv::Size(3, 3), CV_8U, cv::Scalar(0)));
             has_foreground.push_back(false);
+            printf("[!] detection %d failed.                                \r",
+                uid.at(croi));
             croi += 1;
             continue;
         }
 
         croi += 1;
         cv::Mat bgstrict, bgloose, fg, ol;
+        cv::cvtColor(roi, ol, cv::COLOR_GRAY2BGR);
         cv::Mat red(roi.size(), CV_8UC3, cv::Scalar(0, 0, 255));
         cv::Mat green(roi.size(), CV_8UC3, cv::Scalar(0, 255, 0));
         cv::Mat blue(roi.size(), CV_8UC3, cv::Scalar(255, 0, 0));
-
         bool detected = false;
-        int maxiter = 4 + higher_reach;
 
-        double fthreshs[4 + higher_reach] = {
-            0.02,   0.025,  0.032,  0.04,   0.05, 
-            0.0625, 0.0781, 0.0977 /*, 0.122,
-            0.15,   0.18,   0.22 */
-        };
+        // TODO: ...
 
-        double cthreshs[4 + higher_reach] = {
-            0.045,  0.056,  0.07,   0.09,   0.12,
-            0.15,   0.1875, 0.2344 /*, 0.29,
-            0.36,   0.5,   0.75 */
-        };
+        auto start = chrono::system_clock::now();
 
-        double finethresh = fthreshs[3 + higher_reach];
-        double coarsethresh = cthreshs[3 + higher_reach]; 
-        double circularity;
+        torch::Tensor tensor_image = torch::from_blob(
+            roi.data, { roi.rows, roi.cols, 1 }, torch::kByte);
+        tensor_image = tensor_image.permute({ 2, 0, 1 });
+        tensor_image = tensor_image.toType(torch::kFloat);
+        tensor_image = tensor_image.unsqueeze(0);
 
-        while ((!detected) && maxiter > 0) {
+        if (isgpu) tensor_image = tensor_image.to(at::kCUDA);
+        else tensor_image = tensor_image.to(at::kCPU);
 
-            maxiter -= 1;
-            finethresh = fthreshs[maxiter];
-            coarsethresh = cthreshs[maxiter];
-            bgstrict = cv::Mat::zeros(roi.size(), CV_8U);
-            bgloose = cv::Mat::zeros(roi.size(), CV_8U);
-            
-            cv::cvtColor(roi, ol, cv::COLOR_GRAY2BGR);
+        at::Tensor output = model.forward({ tensor_image }).toTensor();
 
-            if (show_msg) printf("[.] performing infection for %d ... \r", uid.at(croi - 1));
-            fflush(stdout);
-            infect(usms.at(croi - 1), bgstrict, cv::Point(1, (roi.rows - 1) / 2 + 1), finethresh);
-            infect(usms.at(croi - 1), bgloose, cv::Point(1, (roi.rows - 1) / 2 + 1), coarsethresh);
+        output = output.squeeze().detach().permute({ 1, 2, 0 });
+        output = output.mul(255).clamp(0, 255).to(torch::kU8);
+        output = output.to(torch::kCPU);
 
-            // extract the foreground from the looser background, as an inner circle
+        // cv::Mat outcv(roi.rows, roi.cols, CV_8U);
+        // std::memcpy(
+        //     (void *) outcv.data, output.data_ptr(),
+        //     sizeof(torch::kU8) * output.numel()
+        // );
 
-            cv::Mat kernel_full = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 3));
-            cv::Mat morph;
+        cv::Mat outcv(cv::Size(roi.cols, roi.rows), CV_8U, output.data_ptr());
 
-            cv::morphologyEx(bgloose, morph, cv::MORPH_CLOSE, kernel_full, cv::Point(-1, -1), 1);
-            reverse(morph);
-            cv::morphologyEx(morph, morph, cv::MORPH_CLOSE, kernel_full, cv::Point(-1, -1), 2);
+        cv::Mat binary;
+        cv::threshold(outcv, binary, 180, 255, cv::THRESH_BINARY);
+        std::vector<std::vector<cv::Point>> contours;
+        cv::findContours(binary, contours, cv::RETR_TREE, cv::CHAIN_APPROX_SIMPLE);
 
-            // extract the central circle.
+        int idc = 0;
+        for (auto cont : contours) {
+            double lenconts = cv::arcLength(cont, true);
+            double area = cv::contourArea(cont, false);
+            double ratio = lenconts * lenconts / area;
 
-            std::vector<std::vector<cv::Point>> contours;
-            cv::findContours(morph, contours, cv::RETR_TREE, cv::CHAIN_APPROX_SIMPLE);
+            if (area > 1000 && area < 50000) {
+                fg = cv::Mat::zeros(roi.size(), CV_8U);
+                cv::drawContours(fg, contours, idc, cv::Scalar(255), cv::FILLED);
+                detected = true;
 
-            // match a roughly circular shape, with an estimated rational size.
+                // draw the background masks.
+                // neural network model does not produce a background detection,
+                // we should just have the left and surrounding part of the surface
+                // only to avoid inclusion of the righter dark lines.
 
-            int idc = 0;
-            for (auto cont : contours) {
-                double lenconts = cv::arcLength(cont, true);
-                double area = cv::contourArea(cont, false);
-                double ratio = lenconts * lenconts / area;
+                bgloose = cv::Mat::zeros(roi.size(), CV_8U);
+                cv::Rect bounds = cv::boundingRect(cont);
+                std::vector<std::vector<cv::Point>> bgcont;
+                std::vector<cv::Point> bgcont1;
+                int padding = 5;
+                bgcont1.push_back(cv::Point(padding, padding));
+                bgcont1.push_back(cv::Point(bounds.x + bounds.width, padding));
+                bgcont1.push_back(cv::Point(bounds.x + bounds.width, roi.rows - padding));
+                bgcont1.push_back(cv::Point(padding, roi.rows - padding));
+                bgcont.push_back(bgcont1);
 
-                if (area > 1000 && area < 50000) {
+                cv::drawContours(bgloose, bgcont, 0, cv::Scalar(255), cv::FILLED);
+                cv::drawContours(bgloose, contours, idc, cv::Scalar(0), cv::FILLED);
 
-                    fg = cv::Mat::zeros(roi.size(), CV_8U);
-                    cv::drawContours(fg, contours, idc, cv::Scalar(255), cv::FILLED);
+                cv::Mat kernel_full = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 3));
+                cv::morphologyEx(
+                    bgloose, bgstrict,
+                    cv::MORPH_ERODE, kernel_full,
+                    cv::Point(-1, -1), padding
+                );
 
-                    int collapse_right = any_right(fg, fg.cols - 20);
-                    if (collapse_right < 10) {
-                        cv::drawContours(
-                            ol, contours, idc, cv::Scalar(0, 0, 255), 2
-                        );
-                        circularity = ratio;
-                        detected = true;
-                        break;
-                    }
+                break;
 
-                } else {
-                    cv::drawContours(ol, contours, idc, cv::Scalar(0, 0, 0), 1);
-                }
-
-                idc ++;
             }
-        }
-
-        // TODO: the higher threshold may be too invasive for the circle detection.
-        // however, for some images (where objects are too sticked to the border)
-        // such invasiveness is required to strip the subject from the 
-        // surroundings. however, these objects may not be round, and may lose
-        // the gradients border of natural color. if the effects are mild, we
-        // will just solve the problem by the 2 or 3 times of dilation when counting
-        // but sometimes the shape itself is far from round and the loss cannot be reversed
-
-        bool nextround = true;
-        bool update = false;
-        cv::Mat backup_fg, backup_ol;
-        fg.copyTo(backup_fg);
-        ol.copyTo(backup_ol);
-
-        while (detected && nextround) {
-            
-            coarsethresh *= 0.64;
-            bgloose = cv::Mat::zeros(roi.size(), CV_8U);
-
-            if (show_msg) printf("[.] correcting infection for %d ... \r", uid.at(croi - 1));
-            fflush(stdout);
-            infect(usms.at(croi - 1), bgloose, cv::Point(1, (roi.rows - 1) / 2 + 1), coarsethresh);
-
-            // extract the foreground from the looser background, as an inner circle
-
-            cv::Mat kernel_full = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 3));
-            cv::Mat morph;
-
-            cv::morphologyEx(bgloose, morph, cv::MORPH_CLOSE, kernel_full, cv::Point(-1, -1), 1);
-            reverse(morph);
-            cv::morphologyEx(morph, morph, cv::MORPH_CLOSE, kernel_full, cv::Point(-1, -1), 2);
-
-            // extract the central circle.
-
-            std::vector<std::vector<cv::Point>> contours;
-            cv::findContours(morph, contours, cv::RETR_TREE, cv::CHAIN_APPROX_SIMPLE);
-
-            int idc = 0;
-            bool hasany = false;
-            for (auto cont : contours) {
-                double lenconts = cv::arcLength(cont, true);
-                double area = cv::contourArea(cont, false);
-                double ratio = lenconts * lenconts / area;
-                
-                // the circularity ratio should decrease (more circular)
-                // after each iteration.
-
-                if (area > 2000 && area < 50000) {
-                    
-                    // update the foreground mask.
-
-                    int collapse_right = any_right(fg, fg.cols - 20);
-                    if (collapse_right < 10) {
-                        if (ratio < circularity * 0.95) {
-                            backup_fg = cv::Mat::zeros(roi.size(), CV_8U);
-                            cv::drawContours(backup_fg, contours, idc, cv::Scalar(255), cv::FILLED);
-                            cv::drawContours(
-                                backup_ol, contours, idc, cv::Scalar(0, 255, 0), 2);
-                            hasany = true;
-                            update = true;
-                            circularity = ratio;
-
-                        } else nextround = false;
-                        break;
-                    }
-                }
-
-                idc ++;
-            }
-
-            if (!hasany) {
-                nextround = false;
-            }
-        }
-
-        if (update) {
-            backup_fg.copyTo(fg);
-            backup_ol.copyTo(ol);
+            else cv::drawContours(ol, contours, idc, cv::Scalar(0, 0, 0), 1);
+            idc++;
         }
 
         // draw the visualization map.
@@ -523,6 +476,14 @@ int process(bool show_msg,
         foreground.push_back(fg);
         overlap.push_back(ol);
         has_foreground.push_back(detected);
+
+        auto end = chrono::system_clock::now();
+        auto duration = chrono::duration_cast<chrono::milliseconds>(end - start);
+        double ms = double(duration.count()) * chrono::milliseconds::period::num /
+            chrono::milliseconds::period::den;
+
+
+        printf("[i] processing detection %d ... %.2f ms \r", uid.at(croi - 1));
     }
 
     printf("\n");
@@ -535,14 +496,14 @@ int process(bool show_msg,
     for (int i = 1; i < start_id; i++) {
         for (int j = 0; j < rawuids.size(); j++) if (rawuids.at(j) == i)
             fprintf(rawfile, "%s", rawlines.at(j));
-        
+
         for (int j = 0; j < statuids.size(); j++) if (statuids.at(j) == i)
             fprintf(statfile, "%s", statlines.at(j));
     }
 
     for (int i = 0; i < rois.size(); i++) {
 
-        char name[512] = {0};
+        char name[512] = { 0 };
         strcpy(name, sample_names.at(i));
 
         char strpass1[2] = ".";
@@ -587,7 +548,7 @@ int process(bool show_msg,
         // any values that may crash the application when calculating log(0).
 
         if (det_success.at(i) && scale_success.at(i) && has_foreground.at(i) &&
-            fsz > 0 && fm > 0 && (backsmean[0] - fm) > 0 && 
+            fsz > 0 && fm > 0 && (backsmean[0] - fm) > 0 &&
             scale_light.at(i) > 0 && scale_dark.at(i) > 0 &&
             scale_light.at(i) > scale_dark.at(i) &&
             backlmean[0] > 0 && backsmean[0] > 0) {
@@ -609,7 +570,7 @@ int process(bool show_msg,
 
         fflush(rawfile);
         fflush(statfile);
-        
+
         char savefname[1024] = "";
         char fmtstring_annot[1024] = "";
         char fmtstring_mask[1024] = "";
@@ -629,7 +590,7 @@ int process(bool show_msg,
     for (int i = end_id + 1; i <= max_id; i++) {
         for (int j = 0; j < rawuids.size(); j++) if (rawuids.at(j) == i)
             fprintf(rawfile, "%s", rawlines.at(j));
-        
+
         for (int j = 0; j < statuids.size(); j++) if (statuids.at(j) == i)
             fprintf(statfile, "%s", statlines.at(j));
     }
