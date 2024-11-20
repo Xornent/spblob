@@ -1,6 +1,7 @@
 
 #define _SILENCE_ALL_CXX17_DEPRECATION_WARNINGS
 #define _CRT_SECURE_NO_WARNINGS
+#define _ARGPARSE_NO_PRINT_ARGUMENT_PROPS
 
 #include <iostream>
 #include <vector>
@@ -8,8 +9,11 @@
 
 #include <opencv2/opencv.hpp>
 
-#ifndef unix
+#ifdef unix
+#define soft_br ""
+#else
 #define ssize_t int
+#define soft_br "\n"
 #endif
 
 void reverse(cv::Mat& binary);

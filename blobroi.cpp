@@ -115,15 +115,15 @@ static double c_distal = (300.0);
 // argument parser
 
 static char doc[] = 
-    "blobroi: detect and extract regions-of-interest from semen patches on test papers. "
-    "this is the first step in the spblob routines (blobroi, blobshed, blobnn). and as the "
-    "shared step for sample image preprocessing. this program reads one or a directory of "
-    "photographs (in *.jpg format) of test papers, detect each paper by the positioning "
-    "triangle, and yields in a specified output folder the faces and scales of the test papers "
-    "with roughly uniform size. the same output folder should be specified as input data for "
-    "later feature extraction routines (blobshed or blobnn, one of them), using methods either "
+    "blobroi: detect and extract regions-of-interest from semen patches on test papers. " soft_br
+    "this is the first step in the spblob routines (blobroi, blobshed, blobnn). and as the " soft_br
+    "shared step for sample image preprocessing. this program reads one or a directory of " soft_br
+    "photographs (in *.jpg format) of test papers, detect each paper by the positioning " soft_br
+    "triangle, and yields in a specified output folder the faces and scales of the test papers " soft_br
+    "with roughly uniform size. the same output folder should be specified as input data for " soft_br
+    "later feature extraction routines (blobshed or blobnn, one of them), using methods either " soft_br
     "derived from watershed-like algorithm or neural network model for object segmentation. \n\n"
-    "this software is a free software licensed under gnu gplv3. it comes with absolutely "
+    "this software is a free software licensed under gnu gplv3. it comes with absolutely " soft_br
     "no warranty. for details, see <https://www.gnu.org/licenses/gpl-3.0.html>";
 
 static char args_doc[] = 
@@ -240,31 +240,22 @@ int main(int argc, char *argv[])
         .default_value(save_count)
         .scan<'i', int>();
 
+    program.add_usage_newline();
+
     program.add_argument("-x", "--scale")
         .help(
-            "the relative scale factor of the output dataset clips (the image dataset for later neural-network "
-            "based detection routine. this takes the perpendicular edge length of the positioning triangle "
-            "to be unified into fold changes from 10px. the default value requires that for each output image, "
+            "the relative scale factor of the output dataset clips (the image dataset " soft_br
+            "for later neural-network based detection routine.) this takes the " soft_br
+            "perpendicular edge length of the positioning triangle to be unified into " soft_br
+            "fold changes from 10px. the default value requires that for each output image, " soft_br
             "the positioning triangle should have an edge length of 26px. (2.6)" )
         .metavar("SCALE")
         .default_value(c_scale_factor)
         .scan<'f', double>();
 
-    program.add_argument("-y", "--posang-size")
-        .help("the minimal size of the positioning angle (50)")
-        .metavar("PSIZE")
-        .default_value(size_thresh)
-        .scan<'i', int>();
-
-    program.add_argument("-z", "--posang-thresh")
-        .help("the red visual intensity threshold for the positioning angle (40)")
-        .metavar("PTHRESH")
-        .default_value(red_thresh)
-        .scan<'i', int>();
-
     program.add_argument("-s", "--size")
-        .help("resolution for the final image. stating that every 1 "
-              "unit in --scale should represent 60px in the dataset image. (60.0)")
+        .help("resolution for the final image. stating that every 1 unit " soft_br
+              "in --scale should represent 60px in the dataset image. (60.0)")
         .metavar("SIZE")
         .default_value(60.0)
         .scan<'f', double>();
@@ -281,6 +272,22 @@ int main(int argc, char *argv[])
         .default_value(c_distal)
         .scan<'f', double>();
 
+    program.add_usage_newline();
+
+    program.add_argument("-y", "--posang-size")
+        .help("the minimal size of the positioning angle (50)")
+        .metavar("PSIZE")
+        .default_value(size_thresh)
+        .scan<'i', int>();
+
+    program.add_argument("-z", "--posang-thresh")
+        .help("the red visual intensity threshold for the positioning angle (40)")
+        .metavar("PTHRESH")
+        .default_value(red_thresh)
+        .scan<'i', int>();
+
+    program.add_usage_newline();
+
     program.add_argument("-o", "--output")
         .help("dataset output directory. must exist prior to running")
         .metavar("OUTPUT")
@@ -292,8 +299,8 @@ int main(int argc, char *argv[])
         .implicit_value(true);
 
     program.add_argument("-f", "--fas")
-        .help("filename as sample name, accept the file name of the image as the sample name "
-              "without prompting the user to enter the sample names manually")
+        .help("filename as sample name, accept the file name of the image as the sample " soft_br
+              "name without prompting the user to enter the sample names manually")
         .default_value(false)
         .implicit_value(true);
 

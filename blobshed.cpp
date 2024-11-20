@@ -66,10 +66,10 @@ ssize_t getline(char **lineptr, size_t *n, FILE *stream) {
 // argument parser
 
 static char doc[] = 
-    "blobshed: detect the intensity of semen patches from extracted uniform datasets. "
-    "this routine runentirely using traditional image segmentation methods with a "
+    "blobshed: detect the intensity of semen patches from extracted uniform datasets. " soft_br
+    "this routine runentirely using traditional image segmentation methods with a " soft_br
     "watershed-like algorithm. \n\n"
-    "this software is a free software licensed under gnu gplv3. it comes with absolutely "
+    "this software is a free software licensed under gnu gplv3. it comes with absolutely " soft_br
     "no warranty. for details, see <https://www.gnu.org/licenses/gpl-3.0.html>";
 
 static char args_doc[] = 

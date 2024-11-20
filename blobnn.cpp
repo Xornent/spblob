@@ -26,6 +26,7 @@ namespace chrono = std::chrono;
 int start_id = 1;
 int end_id = INT32_MAX - 10; // we will calculate end_id + 1, no overflow then.
 int max_id = 1;
+int pred_cutoff = 180;
 
 static FILE* rawfile = NULL;
 static FILE* statfile = NULL;
@@ -72,18 +73,19 @@ ssize_t getline(char** lineptr, size_t* n, FILE* stream) {
 // argument parser
 
 static char doc[] =
-"blobnn: detect the intensity of semen patches from extracted uniform datasets. "
+"blobnn: detect the intensity of semen patches from extracted uniform datasets. " soft_br
 "this routine utilizes a neural network model. (based on unet segmentation) \n\n"
-"this software is a free software licensed under gnu gplv3. it comes with absolutely "
+"this software is a free software licensed under gnu gplv3. it comes with absolutely " soft_br
 "no warranty. for details, see <https://www.gnu.org/licenses/gpl-3.0.html>";
 
 static char args_doc[] =
-"[--start M] [--end N] [--model PT] [SOURCE]";
+"[--start M] [--end N] [--cutoff CUTOFF] [--model PT] [SOURCE]";
 
 #ifdef unix
 static struct argp_option options[] = {
     { "start", 'm', "M", 0, "starting index (included) of the uid. (0)"},
     { "end", 'n', "N", 0, "ending index (included) of the uid. (int32-max)"},
+    { "cutoff", "c", "CUTOFF", 0, "prediction grayscale cutoff for foreground mask (180)" },
     { "model", 't', "PT", 0, "path to the torch script model (*.pt)"},
     { 0 }
 };
@@ -98,6 +100,9 @@ static error_t parse_opt(int key, char* arg, struct argp_state* state) {
         break;
     case 'n':
         end_id = atoi(arg);
+        break;
+    case 'c':
+        pred_cutoff = atoi(arg);
         break;
     case 't':
         strcpy(modelfpath, arg);
@@ -144,9 +149,19 @@ int main(int argc, char* argv[])
         .default_value(end_id)
         .scan<'i', int>();
 
+    program.add_usage_newline();
+
+    program.add_argument("-c", "--cutoff")
+        .help("prediction grayscale cutoff for foreground mask (180)")
+        .metavar("CUTOFF")
+        .default_value(pred_cutoff)
+        .scan<'i', int>();
+
     program.add_argument("-t", "--model")
         .help("path to the torch script model (*.pt)")
         .metavar("PT");
+
+    program.add_usage_newline();
 
     program.add_argument("source")
         .help("the directory of blobroi's output, as the input")
@@ -183,6 +198,7 @@ int main(int argc, char* argv[])
 
     start_id = program.get<int>("--start");
     end_id = program.get<int>("--end");
+    pred_cutoff = program.get<int>("--cutoff");
     strcpy(modelfpath, program.get("--model").c_str());
     strcpy(datapath, program.get("source").c_str());
 
@@ -410,6 +426,7 @@ int process(bool show_msg,
     std::vector< cv::Mat > back_strict;
     std::vector< cv::Mat > back_loose;
     std::vector< cv::Mat > foreground;
+    std::vector< cv::Mat > graymask;
     std::vector< cv::Mat > overlap;
     std::vector< bool > has_foreground;
     
@@ -474,6 +491,9 @@ int process(bool show_msg,
         // );
 
         cv::Mat outcv(cv::Size(roi.cols, roi.rows), CV_8U, output.data_ptr());
+        cv::Mat copycv;
+        outcv.copyTo(copycv);
+        graymask.push_back(copycv);
 
         cv::Mat binary;
         cv::threshold(outcv, binary, 180, 255, cv::THRESH_BINARY);
@@ -671,7 +691,7 @@ int process(bool show_msg,
         cv::imwrite(savefname, overlap.at(i));
 
         sprintf(savefname, fmtstring_mask, uid.at(i));
-        cv::imwrite(savefname, foreground.at(i));
+        cv::imwrite(savefname, graymask.at(i));
     }
 
     for (int i = end_id + 1; i <= max_id; i++) {

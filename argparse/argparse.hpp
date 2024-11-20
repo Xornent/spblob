@@ -1208,6 +1208,7 @@ public:
       }
     }
 
+#ifndef _ARGPARSE_NO_PRINT_ARGUMENT_PROPS
     // print nargs spec
     if (!argument.m_help.empty()) {
       stream << " ";
@@ -1229,6 +1230,8 @@ public:
       }
       stream << "[may be repeated]";
     }
+#endif
+
     stream << "\n";
     return stream;
   }

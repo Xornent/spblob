@@ -66,7 +66,7 @@
           --usage           give a short usage message.
       -V, --version         print program version.
 
-    usage: blobshed [OPTION...] [--start M] [--end N] [SOURCE]
+    usage: blobshed [OPTION...] [--start M] [--end N] SOURCE
 
     blobshed: detect the intensity of semen patches from extracted uniform
     datasets. this routine runentirely using traditional image segmentation methods
@@ -77,6 +77,23 @@
       -?, --help            give this help list
           --usage           give a short usage message
       -V, --version         print program version
+
+    usage: blobnn [--help] [--version] [--start M] [--end N]
+                  [--cutoff CUTOFF] [--model PT] SOURCE
+
+    blobnn: detect the intensity of semen patches from extracted uniform datasets. 
+    this routine utilizes a neural network model. (based on unet segmentation) 
+    
+    Positional arguments:
+      SOURCE          the directory of blobroi's output, as the input
+    
+    Optional arguments:
+      -h, --help            shows help message and exits
+      -v, --version         prints version information and exits
+      -m, --start           starting index (included) of the uid. (0)
+      -n, --end             ending index (included) of the uid. (int32-max)
+      -c, --cutoff          prediction grayscale cutoff for foreground mask (180)
+      -t, --model PT        path to the torch script model (*.pt)
 
     these softwares are free softwares licensed under gnu gplv3. it comes with
     absolutely no warranty. for details, see
@@ -186,5 +203,5 @@
     report bugs to yang-z. <xornent@outlook.com>.
 
 
-last update: nov. 18, 2024.
+last update: nov. 20, 2024.
 yang-z.
