@@ -158,6 +158,26 @@ int main(int argc, char* argv[])
     catch (const std::exception& err) {
         std::cerr << err.what() << std::endl;
         std::cerr << program;
+
+        printf("\n");
+
+        bool gpu = true;
+        if (torch::cuda::is_available())
+            printf("[i] cuda available on this device. \n");
+        else {
+            printf("[i] no gpu or no corrected cuda driver installed. \n");
+            gpu = false;
+        }
+
+        if (gpu && torch::cuda::cudnn_is_available())
+            printf("[i] cudnn available on this device. \n");
+        else gpu = false;
+
+        if (gpu) {
+            printf("[i] found %ld available gpu(s) installed on this device. \n",
+                torch::cuda::device_count());
+        }
+
         std::exit(1);
     }
 

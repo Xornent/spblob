@@ -13,6 +13,7 @@ spblob*
 dataset
 annots
 bin
+bin-cuda
 out
 
 *.o
