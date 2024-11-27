@@ -453,6 +453,7 @@ int process(bool show_msg,
             back_loose.push_back(cv::Mat(cv::Size(3, 3), CV_8U, cv::Scalar(0)));
             foreground.push_back(cv::Mat(cv::Size(3, 3), CV_8U, cv::Scalar(0)));
             overlap.push_back(cv::Mat(cv::Size(3, 3), CV_8U, cv::Scalar(0)));
+            graymask.push_back(cv::Mat(cv::Size(3, 3), CV_8U, cv::Scalar(0)));
             has_foreground.push_back(false);
             printf("[!] detection %d failed.                                \r",
                 uid.at(croi));
